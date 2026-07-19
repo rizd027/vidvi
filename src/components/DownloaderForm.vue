@@ -4,10 +4,12 @@ import { useQuery } from '@tanstack/vue-query'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
 import { useAppStore } from '../store/appStore'
+import { useHistoryStore } from '../store/historyStore'
 
 const { t, locale } = useI18n()
 const message = useMessage()
 const appStore = useAppStore()
+const historyStore = useHistoryStore()
 
 type Platform = 'spotify' | 'tiktok' | 'capcut' | 'youtube' | 'instagram' | 'facebook' | 'twitter' | ''
 
@@ -94,6 +96,35 @@ watch([isLoading, mediaData, error], ([loading, data, err]) => {
       currentStep.value = 3
       message.success(t('downloadSuccess'))
       fetchTriggered.value = false
+      // Save to history (localStorage)
+      const platform = selectedPlatform.value
+      const url = inputUrl.value.trim()
+      let title = '', thumbnail = '', download_url = '', duration = '', media_type = 'video'
+      if (platform === 'spotify') {
+        title = data.title || 'Spotify Track'; thumbnail = data.thumbnail || ''
+        download_url = data.downloadUrl || ''; duration = String(data.duration || ''); media_type = 'audio'
+      } else if (platform === 'tiktok') {
+        title = data.title || 'TikTok Video'; thumbnail = data.cover || ''
+        download_url = data.video || data.audio || ''; duration = String(data.duration || '')
+      } else if (platform === 'capcut') {
+        title = data.title || 'CapCut Template'; thumbnail = data.cover || ''
+        download_url = data.video || ''
+      } else if (platform === 'youtube') {
+        title = data.title || 'YouTube Video'; thumbnail = data.thumbnail || ''
+        download_url = data.videoUrl || ''; duration = String(data.duration || '')
+      } else if (platform === 'instagram') {
+        title = data.title || 'Instagram Video'; thumbnail = data.thumbnail || ''
+        download_url = data.videoUrl || ''
+      } else if (platform === 'facebook') {
+        title = data.title || 'Facebook Video'; thumbnail = data.thumbnail || ''
+        download_url = data.videoUrl || ''
+      } else if (platform === 'twitter') {
+        title = data.title || 'Twitter/X Video'; thumbnail = data.thumbnail || ''
+        download_url = data.videoUrl || ''
+      }
+      if (platform) {
+        historyStore.addItem({ platform, url, title, thumbnail, duration, download_url, media_type, size: 'Unknown' })
+      }
     }
   }
 })

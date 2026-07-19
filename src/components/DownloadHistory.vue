@@ -1,80 +1,28 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useI18n } from 'vue-i18n'
 import { useMessage, useDialog } from 'naive-ui'
 import { useAppStore } from '../store/appStore'
+import { useHistoryStore, type HistoryItem } from '../store/historyStore'
 
 const { t } = useI18n()
 const message = useMessage()
 const dialog = useDialog()
 const appStore = useAppStore()
-const queryClient = useQueryClient()
+const historyStore = useHistoryStore()
 
-// Filter options: 'all', 'spotify', 'tiktok', 'capcut'
+// Filter options
 const activeFilter = ref<'all' | 'spotify' | 'tiktok' | 'capcut' | 'youtube' | 'instagram' | 'facebook' | 'twitter'>('all')
 const searchQuery = ref('')
 
-// Fetch history
-const fetchHistory = async () => {
-  const res = await fetch('/api/history')
-  if (!res.ok) throw new Error('Failed to fetch history')
-  const json = await res.json()
-  return json.data || []
-}
-
-const { data: historyList, isLoading } = useQuery({
-  queryKey: ['history'],
-  queryFn: fetchHistory,
-  refetchOnWindowFocus: true
-})
-
-// Clear all history mutation
-const clearHistoryMutation = useMutation({
-  mutationFn: async () => {
-    const res = await fetch('/api/history', { method: 'DELETE' })
-    if (!res.ok) throw new Error('Failed to clear history')
-    return res.json()
-  },
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['history'] })
-    message.success(t('clearSuccess'))
-  },
-  onError: (err) => {
-    message.error(err.message)
-  }
-})
-
-// Delete single record mutation
-const deleteRecordMutation = useMutation({
-  mutationFn: async (id: number) => {
-    const res = await fetch(`/api/history/${id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('Failed to delete item')
-    return res.json()
-  },
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['history'] })
-    message.success(t('deleteSuccess'))
-  },
-  onError: (err) => {
-    message.error(err.message)
-  }
-})
-
 // Filtered and searched list
 const filteredHistory = computed(() => {
-  if (!historyList.value) return []
-  
-  return historyList.value.filter((item: any) => {
-    // Platform filter
+  return historyStore.items.filter((item: HistoryItem) => {
     const matchesPlatform = activeFilter.value === 'all' || item.platform === activeFilter.value
-    
-    // Search text filter
     const titleText = (item.title || '').toLowerCase()
     const urlText = (item.url || '').toLowerCase()
     const query = searchQuery.value.toLowerCase().trim()
     const matchesSearch = !query || titleText.includes(query) || urlText.includes(query)
-    
     return matchesPlatform && matchesSearch
   })
 })
@@ -86,12 +34,18 @@ const handleClearAll = () => {
     positiveText: t('next'),
     negativeText: t('back'),
     onPositiveClick: () => {
-      clearHistoryMutation.mutate()
+      historyStore.clearAll()
+      message.success(t('clearSuccess'))
     }
   })
 }
 
-const triggerRedownload = (item: any) => {
+const handleDelete = (id: number) => {
+  historyStore.removeItem(id)
+  message.success(t('deleteSuccess'))
+}
+
+const triggerRedownload = (item: HistoryItem) => {
   appStore.prefillDownload(item.url, item.platform)
 }
 
@@ -108,7 +62,7 @@ const formatDate = (dateStr: string) => {
       <div class="title-row">
         <h2>{{ t('downloadHistory') }}</h2>
         <button 
-          v-if="historyList && historyList.length > 0" 
+          v-if="historyStore.items.length > 0" 
           class="btn-clear-all" 
           @click="handleClearAll"
         >
@@ -117,7 +71,7 @@ const formatDate = (dateStr: string) => {
       </div>
 
       <!-- Search & Filters -->
-      <div class="filter-controls" v-if="historyList && historyList.length > 0">
+      <div class="filter-controls" v-if="historyStore.items.length > 0">
         <input 
           v-model="searchQuery" 
           type="text" 
@@ -140,11 +94,7 @@ const formatDate = (dateStr: string) => {
     </div>
 
     <!-- History List -->
-    <div v-if="isLoading" class="loading-state text-center">
-      <div class="spinner" style="margin: 0 auto;"></div>
-    </div>
-
-    <div v-else-if="filteredHistory.length === 0" class="empty-state text-center">
+    <div v-if="filteredHistory.length === 0" class="empty-state text-center">
       <p>{{ t('emptyHistory') }}</p>
     </div>
 
@@ -174,7 +124,7 @@ const formatDate = (dateStr: string) => {
           <button class="action-btn download" :title="t('quickDownload')" @click="triggerRedownload(item)">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
           </button>
-          <button class="action-btn delete" :title="t('clearHistory')" @click="deleteRecordMutation.mutate(item.id)">
+          <button class="action-btn delete" :title="t('clearHistory')" @click="handleDelete(item.id)">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
           </button>
         </div>
