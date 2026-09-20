@@ -284,34 +284,83 @@ const currentPlatformLabel = computed(() => {
 })
 
 // ── Clipboard & Auto-Paste Helpers ──
-const pasteFromClipboard = async () => {
-  try {
-    const text = await navigator.clipboard.readText()
-    if (text) {
-      inputUrl.value = text.trim()
-    } else {
-      message.warning(t('clipboardError') || 'Papan klip kosong.')
+
+// Show manual paste dialog (fallback for WebView/APK where clipboard API is blocked)
+const showManualPasteDialog = ref(false)
+const manualPasteValue = ref('')
+const manualPasteMode = ref<'paste' | 'pasteAndDownload'>('paste')
+
+const openManualPasteDialog = (mode: 'paste' | 'pasteAndDownload') => {
+  manualPasteValue.value = ''
+  manualPasteMode.value = mode
+  showManualPasteDialog.value = true
+  // Focus input after dialog opens
+  nextTick(() => {
+    const el = document.getElementById('manual-paste-input')
+    if (el) el.focus()
+  })
+}
+
+const confirmManualPaste = async () => {
+  const url = manualPasteValue.value.trim()
+  showManualPasteDialog.value = false
+  if (!url) return
+  inputUrl.value = url
+  if (manualPasteMode.value === 'pasteAndDownload') {
+    await nextTick()
+    handleSearch()
+  }
+}
+
+// Read clipboard with multi-layer fallback for WebView compatibility
+const readClipboard = async (): Promise<string | null> => {
+  // Layer 1: Modern Clipboard API
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) return text
+    } catch (err) {
+      console.warn('Clipboard API failed, trying fallback:', err)
     }
-  } catch (err) {
-    message.error(t('clipboardError') || 'Gagal membaca papan klip. Berikan izin akses papan klip.')
-    console.error('Failed to read clipboard:', err)
+  }
+
+  // Layer 2: Legacy execCommand('paste') via hidden input
+  try {
+    const hiddenInput = document.createElement('textarea')
+    hiddenInput.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0'
+    document.body.appendChild(hiddenInput)
+    hiddenInput.focus()
+    const success = document.execCommand('paste')
+    const text = hiddenInput.value
+    document.body.removeChild(hiddenInput)
+    if (success && text) return text
+  } catch (e2) {
+    console.warn('execCommand paste failed:', e2)
+  }
+
+  return null
+}
+
+const pasteFromClipboard = async () => {
+  const text = await readClipboard()
+  if (text) {
+    inputUrl.value = text.trim()
+  } else {
+    // Layer 3: Manual paste dialog (WebView fallback)
+    openManualPasteDialog('paste')
   }
 }
 
 const pasteAndDownload = async () => {
-  try {
-    const text = await navigator.clipboard.readText()
-    if (text) {
-      const url = text.trim()
-      inputUrl.value = url
-      await nextTick()
-      handleSearch()
-    } else {
-      message.warning(t('clipboardError') || 'Papan klip kosong.')
-    }
-  } catch (err) {
-    message.error(t('clipboardError') || 'Gagal membaca papan klip. Berikan izin akses papan klip.')
-    console.error('Failed to read clipboard:', err)
+  const text = await readClipboard()
+  if (text) {
+    const url = text.trim()
+    inputUrl.value = url
+    await nextTick()
+    handleSearch()
+  } else {
+    // Layer 3: Manual paste dialog (WebView fallback)
+    openManualPasteDialog('pasteAndDownload')
   }
 }
 
@@ -321,7 +370,7 @@ const checkAutoPaste = async () => {
   if (inputUrl.value.trim() !== '') return
 
   try {
-    const text = await navigator.clipboard.readText()
+    const text = await readClipboard()
     if (text) {
       const url = text.trim()
       const isSupported = (
@@ -810,7 +859,51 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
       </div>
     </div>
   </div>
+
+  <!-- Manual Paste Dialog (WebView/APK fallback when clipboard API is blocked) -->
+  <Teleport to="body">
+    <Transition name="dialog-fade">
+      <div v-if="showManualPasteDialog" class="manual-paste-overlay" @click.self="showManualPasteDialog = false">
+        <div class="manual-paste-dialog">
+          <div class="manual-paste-header">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+            </svg>
+            <span>{{ t('pasteUrl') || 'Tempel URL' }}</span>
+          </div>
+          <p class="manual-paste-desc">{{ t('pasteUrlDesc') || 'Salin URL dari aplikasi lain, lalu tempel di sini.' }}</p>
+          <div class="manual-paste-input-wrap">
+            <input
+              id="manual-paste-input"
+              v-model="manualPasteValue"
+              type="url"
+              class="manual-paste-input"
+              :placeholder="t('searchPlaceholder') || 'https://...'"
+              @keyup.enter="confirmManualPaste"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+          </div>
+          <div class="manual-paste-actions">
+            <button class="btn-secondary" @click="showManualPasteDialog = false">
+              {{ t('cancel') || 'Batal' }}
+            </button>
+            <button class="btn-primary" :disabled="!manualPasteValue.trim()" @click="confirmManualPaste">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              {{ manualPasteMode === 'pasteAndDownload' ? (t('downloadBtn') || 'Unduh') : (t('paste') || 'Tempel') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
+
 
 <style scoped>
 .borderless-card {
@@ -1491,4 +1584,100 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
   transform: translate(-50%, -50%) scale(1.1) !important;
   box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.4) !important;
 }
+
+/* ── Manual Paste Dialog (WebView/APK fallback) ── */
+.manual-paste-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 env(safe-area-inset-bottom, 0);
+}
+
+.manual-paste-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px 20px 0 0;
+  padding: 24px 20px 32px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.3);
+}
+
+.manual-paste-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.manual-paste-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.manual-paste-input-wrap {
+  margin-bottom: 16px;
+}
+
+.manual-paste-input {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1.5px solid var(--border-color);
+  border-radius: 12px;
+  padding: 13px 16px;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.manual-paste-input:focus {
+  border-color: var(--accent-color);
+}
+
+.manual-paste-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.manual-paste-actions .btn-secondary,
+.manual-paste-actions .btn-primary {
+  flex: 1;
+  padding: 13px 16px;
+  font-size: 0.9rem;
+}
+
+/* Dialog transition */
+.dialog-fade-enter-active,
+.dialog-fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.dialog-fade-enter-active .manual-paste-dialog,
+.dialog-fade-leave-active .manual-paste-dialog {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.dialog-fade-enter-from,
+.dialog-fade-leave-to {
+  opacity: 0;
+}
+.dialog-fade-enter-from .manual-paste-dialog {
+  transform: translateY(100%);
+}
+.dialog-fade-leave-to .manual-paste-dialog {
+  transform: translateY(100%);
+}
 </style>
+
