@@ -311,7 +311,100 @@ async function handleYoutube(url) {
 
 // ─── Instagram Handler ─────────────────────────────────────────────────────
 async function handleInstagram(url) {
-  // Try Cobalt first
+  // Method 1: FastDL API (fast, high reliability, supports reels & carousels)
+  try {
+    const res = await fetch('https://fastdl.to/api/ajaxSearch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: new URLSearchParams({ q: url, t: 'media', lang: 'en' }),
+      signal: AbortSignal.timeout(12000)
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const html = json.data || '';
+      const items = [];
+      const liMatches = [...html.matchAll(/<div class="download-items">([\s\S]*?)<\/li>/gi)];
+      for (const li of liMatches) {
+        const content = li[1];
+        const thumb = content.match(/<img[^>]+src="([^"]+)"/i)?.[1] || '';
+        const video = content.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Video"/i)?.[1] ||
+                      content.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Photo"/i)?.[1];
+        if (video) items.push({ thumbnail: thumb, url: video });
+      }
+
+      if (items.length === 0) {
+        const singleVideo = html.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Video"/i)?.[1] ||
+                            html.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Photo"/i)?.[1];
+        const singleThumb = html.match(/<img[^>]+src="([^"]+)"/i)?.[1] || '';
+        if (singleVideo) items.push({ thumbnail: singleThumb, url: singleVideo });
+      }
+
+      if (items.length > 0) {
+        return {
+          title: 'Instagram Video',
+          author: 'Instagram',
+          thumbnail: items[0].thumbnail || '',
+          videoUrl: items[0].url,
+          picker: items.length > 1 ? items.map((it, idx) => ({ url: it.url, thumbnail: it.thumbnail, index: idx + 1 })) : null,
+          duration: 0
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('FastDL Instagram failed, trying fallback API:', err.message.slice(0, 80));
+  }
+
+  // Method 2: BTCH / backend1 API
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/igdl?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.result || data.data || []);
+      const validItems = list.filter(item => item && (item.url || item.download_url));
+      if (validItems.length > 0) {
+        return {
+          title: 'Instagram Video',
+          author: 'Instagram',
+          thumbnail: validItems[0].thumbnail || '',
+          videoUrl: validItems[0].url || validItems[0].download_url,
+          picker: validItems.length > 1 ? validItems.map((it, idx) => ({ url: it.url || it.download_url, thumbnail: it.thumbnail, index: idx + 1 })) : null,
+          duration: 0
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Instagram failed, trying yt-dlp:', err.message.slice(0, 80));
+  }
+
+  // Method 3: yt-dlp
+  if (HAS_YTDLP) {
+    try {
+      const json = await fetchViaYtdlp(url);
+      const formats = (json.formats || []).filter(f => f.url && (f.ext === 'mp4' || f.vcodec !== 'none'));
+      const bestVideo = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').sort((a, b) => (b.height || 0) - (a.height || 0))[0] || formats[0];
+      const videoUrl = bestVideo?.url || json.url || '';
+      if (videoUrl) {
+        return {
+          title: json.title || 'Instagram Video',
+          author: json.uploader || 'Instagram',
+          thumbnail: json.thumbnail || '',
+          duration: json.duration || 0,
+          videoUrl,
+        };
+      }
+    } catch (ytdlpErr) {
+      console.warn('yt-dlp Instagram failed:', ytdlpErr.message.slice(0, 80));
+    }
+  }
+
+  // Method 4: Cobalt fallback
   const cobalt = await fetchViaCobalt(url);
   if (cobalt) {
     return {
@@ -324,64 +417,69 @@ async function handleInstagram(url) {
     };
   }
 
-  // Try multiple scraper APIs
-  const scrapers = [
-    async () => {
-      // SnapSave style
-      const res = await fetch('https://snapsave.app/action.php', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Referer': 'https://snapsave.app',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
-        },
-        body: new URLSearchParams({ url }),
-        signal: AbortSignal.timeout(10000)
-      });
-      if (!res.ok) return null;
-      const text = await res.text();
-      const mp4Match = text.match(/https?:\/\/[^"'<>\s]+\.mp4[^"'<>\s]*/);
-      if (mp4Match) return { videoUrl: mp4Match[0], title: 'Instagram Video', author: 'Instagram' };
-      return null;
-    },
-    async () => {
-      // SaveInsta API
-      const res = await fetch(`https://v3.saveinsta.app/api/ajaxSearch`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Referer': 'https://saveinsta.app',
-          'User-Agent': 'Mozilla/5.0'
-        },
-        body: new URLSearchParams({ q: url, t: 'media', lang: 'en' }),
-        signal: AbortSignal.timeout(10000)
-      });
-      if (!res.ok) return null;
-      const json = await res.json();
-      if (json.data) {
-        const dataStr = JSON.stringify(json.data);
-        const mp4Match = dataStr.match(/https?:[^"'<>\s]+\.mp4/);
-        if (mp4Match) return { videoUrl: mp4Match[0], title: json.title || 'Instagram Video', author: 'Instagram' };
-      }
-      return null;
-    }
-  ];
-
-  for (const scraper of scrapers) {
-    try {
-      const result = await scraper();
-      if (result) return result;
-    } catch (e) {
-      console.warn('Instagram scraper failed:', e.message.slice(0, 80));
-    }
-  }
-
-  throw new Error('Failed to fetch Instagram video. Instagram blocks unauthenticated server access. Try using a browser extension or logging in.');
+  throw new Error('Gagal mengambil video Instagram. Pastikan akun tidak privat dan tautan valid.');
 }
 
 // ─── Facebook Handler ──────────────────────────────────────────────────────
 async function handleFacebook(url) {
-  // Try Cobalt first
+  // Method 1: yt-dlp (primary for local server)
+  if (HAS_YTDLP) {
+    try {
+      const json = await fetchViaYtdlp(url);
+      const formats = (json.formats || []).filter(f => f.url && (f.ext === 'mp4' || f.vcodec !== 'none'));
+      const bestVideo = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').sort((a, b) => (b.height || 0) - (a.height || 0))[0] || formats[0];
+      const videoUrl = bestVideo?.url || json.url || '';
+      if (videoUrl) {
+        return {
+          title: json.title || 'Facebook Video',
+          author: json.uploader || 'Facebook',
+          thumbnail: json.thumbnail || '',
+          duration: json.duration || 0,
+          videoUrl,
+        };
+      }
+    } catch (err) {
+      console.warn('yt-dlp Facebook failed, trying API fallback:', err.message.slice(0, 80));
+    }
+  }
+
+  // Method 2: BTCH / backend1 API
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/fbdown?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      let videoUrl = data.HD || data.Normal_video;
+      if (videoUrl) {
+        // Decode direct fbcdn URL if tokenized
+        if (videoUrl.includes('token=')) {
+          try {
+            const token = videoUrl.match(/token=([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/)?.[1];
+            if (token) {
+              const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+              if (payload.url && payload.url.startsWith('http')) {
+                videoUrl = payload.url;
+              }
+            }
+          } catch {}
+        }
+
+        return {
+          title: data.title || 'Facebook Video',
+          author: 'Facebook',
+          thumbnail: '',
+          duration: 0,
+          videoUrl
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Facebook failed:', err.message.slice(0, 80));
+  }
+
+  // Method 3: Cobalt fallback
   const cobalt = await fetchViaCobalt(url);
   if (cobalt) {
     return {
@@ -393,48 +491,83 @@ async function handleFacebook(url) {
     };
   }
 
-  // Try fdown/getfvid style scrapers
-  const scrapers = [
-    async () => {
-      const res = await fetch('https://fdown.net/download.php', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Referer': 'https://fdown.net/',
-          'Origin': 'https://fdown.net',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml'
-        },
-        body: new URLSearchParams({ URLz: url }),
-        signal: AbortSignal.timeout(12000)
-      });
-      if (!res.ok) return null;
-      const text = await res.text();
-      // Extract HD or SD video URL from fbcdn
-      const hdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"[^>]*>HD/i);
-      const sdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"[^>]*>SD/i);
-      const anyMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]+\.mp4[^"]*)"/i);
-      const videoUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
-      if (videoUrl) return { videoUrl, title: 'Facebook Video', author: 'Facebook' };
-      return null;
-    }
-  ];
-
-  for (const scraper of scrapers) {
-    try {
-      const result = await scraper();
-      if (result) return result;
-    } catch (e) {
-      console.warn('Facebook scraper failed:', e.message.slice(0, 80));
-    }
-  }
-
-  throw new Error('Failed to fetch Facebook video. Facebook blocks unauthenticated server access.');
+  throw new Error('Gagal mengambil video Facebook. Pastikan video bersifat publik.');
 }
 
 // ─── Twitter Handler ───────────────────────────────────────────────────────
 async function handleTwitter(url) {
-  // Try Cobalt first
+  // Method 1: yt-dlp (primary for local server)
+  if (HAS_YTDLP) {
+    try {
+      const json = await fetchViaYtdlp(url);
+      const formats = (json.formats || []).filter(f => f.url && (f.ext === 'mp4' || f.vcodec !== 'none'));
+      const bestVideo = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').sort((a, b) => (b.height || 0) - (a.height || 0))[0] || formats[0];
+      const videoUrl = bestVideo?.url || json.url || '';
+      if (videoUrl) {
+        return {
+          title: json.title || json.fulltitle || 'Twitter/X Video',
+          author: json.uploader || 'Twitter User',
+          thumbnail: json.thumbnail || '',
+          duration: json.duration || 0,
+          videoUrl,
+        };
+      }
+    } catch (err) {
+      console.warn('yt-dlp Twitter failed, trying API fallback:', err.message.slice(0, 80));
+    }
+  }
+
+  // Method 2: BTCH / backend1 API
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/twitter?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const urls = Array.isArray(data.url) ? data.url : [];
+      const bestUrl = urls[0]?.hd || urls[0]?.sd || urls[1]?.hd || urls[1]?.sd || (typeof data.url === 'string' ? data.url : '');
+      if (bestUrl) {
+        return {
+          title: data.title || 'Twitter/X Video',
+          author: 'Twitter User',
+          thumbnail: '',
+          duration: 0,
+          videoUrl: bestUrl
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Twitter failed:', err.message.slice(0, 80));
+  }
+
+  // Method 3: fxtwitter embed API
+  const tweetId = url.match(/status\/(\d+)/)?.[1];
+  if (tweetId) {
+    try {
+      const res = await fetch(`https://api.fxtwitter.com/status/${tweetId}`, {
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.tweet?.media?.videos?.length > 0) {
+          const video = json.tweet.media.videos[0];
+          return {
+            title: json.tweet.text || 'Twitter/X Video',
+            author: json.tweet.author?.name || 'Twitter User',
+            thumbnail: json.tweet.media.videos[0].thumbnail_url || '',
+            videoUrl: video.variants?.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url || video.url || '',
+            duration: 0
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('fxtwitter failed:', err.message.slice(0, 80));
+    }
+  }
+
+  // Method 4: Cobalt fallback
   const cobalt = await fetchViaCobalt(url);
   if (cobalt) {
     return {
@@ -446,62 +579,7 @@ async function handleTwitter(url) {
     };
   }
 
-  // Try multiple Twitter-specific APIs
-  const tweetId = url.match(/status\/(\d+)/)?.[1];
-  if (!tweetId) throw new Error('Could not extract tweet ID from URL.');
-
-  const scrapers = [
-    // vxtwitter / fxtwitter embed API
-    async () => {
-      const res = await fetch(`https://api.fxtwitter.com/status/${tweetId}`, {
-        headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(10000)
-      });
-      if (!res.ok) return null;
-      const json = await res.json();
-      if (json.tweet?.media?.videos?.length > 0) {
-        const video = json.tweet.media.videos[0];
-        return {
-          title: json.tweet.text || 'Twitter/X Video',
-          author: json.tweet.author?.name || 'Twitter User',
-          thumbnail: json.tweet.media.videos[0].thumbnail_url || '',
-          videoUrl: video.variants?.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url || video.url || '',
-          duration: 0
-        };
-      }
-      return null;
-    },
-    // Twitsave scraper approach
-    async () => {
-      const res = await fetch(`https://twitsave.com/info?url=${encodeURIComponent(url)}`, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-          'Referer': 'https://twitsave.com/',
-          'Accept': 'text/html,application/xhtml+xml'
-        },
-        signal: AbortSignal.timeout(10000),
-        redirect: 'follow'
-      });
-      const text = await res.text();
-      const mp4Matches = text.match(/https?:\/\/[^"'<>\s]+\.mp4[^"'<>\s]*/g);
-      if (mp4Matches && mp4Matches.length > 0) {
-        return { videoUrl: mp4Matches[0], title: 'Twitter/X Video', author: 'Twitter User' };
-      }
-      return null;
-    }
-  ];
-
-  for (const scraper of scrapers) {
-    try {
-      const result = await scraper();
-      if (result) return result;
-    } catch (e) {
-      console.warn('Twitter scraper failed:', e.message.slice(0, 80));
-    }
-  }
-
-  throw new Error('Failed to fetch Twitter/X video. Twitter heavily restricts server-side access without authentication.');
+  throw new Error('Gagal mengambil video Twitter/X. Pastikan postingan memiliki video dan tidak dikunci.');
 }
 
 // ─── TikTok Handler ────────────────────────────────────────────────────────
@@ -829,11 +907,17 @@ app.get('/api/proxy-download', async (req, res) => {
     } else if (u.includes('tiktokcdn.com') || u.includes('tiktok.com') || u.includes('muscdn.com')) {
       headers['Referer'] = 'https://www.tiktok.com/';
       headers['Origin'] = 'https://www.tiktok.com';
-    } else if (u.includes('cdninstagram.com') || u.includes('instagram.com') || u.includes('fbcdn.net')) {
+    } else if (u.includes('snapcdn.app')) {
+      headers['Referer'] = 'https://fastdl.to/';
+      headers['Origin'] = 'https://fastdl.to';
+    } else if (u.includes('rapidcdn.app')) {
+      headers['User-Agent'] = 'TelegramBot (like TwitterBot)';
+    } else if (u.includes('cdninstagram.com') || u.includes('instagram.com')) {
       headers['Referer'] = 'https://www.instagram.com/';
       headers['Origin'] = 'https://www.instagram.com';
-    } else if (u.includes('facebook.com') || u.includes('fbwat.ch')) {
+    } else if (u.includes('fbcdn.net') || u.includes('facebook.com') || u.includes('fbwat.ch')) {
       headers['Referer'] = 'https://www.facebook.com/';
+      headers['User-Agent'] = 'facebookexternalhit/1.1';
     } else if (u.includes('twitter.com') || u.includes('twimg.com') || u.includes('x.com')) {
       headers['Referer'] = 'https://x.com/';
     } else {

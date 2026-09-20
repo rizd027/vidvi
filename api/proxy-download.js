@@ -34,11 +34,17 @@ export default async function handler(req, res) {
     } else if (u.includes('tiktokcdn.com') || u.includes('tiktok.com') || u.includes('muscdn.com')) {
       headers['Referer'] = 'https://www.tiktok.com/';
       headers['Origin'] = 'https://www.tiktok.com';
-    } else if (u.includes('cdninstagram.com') || u.includes('instagram.com') || u.includes('fbcdn.net')) {
+    } else if (u.includes('snapcdn.app')) {
+      headers['Referer'] = 'https://fastdl.to/';
+      headers['Origin'] = 'https://fastdl.to';
+    } else if (u.includes('rapidcdn.app')) {
+      headers['User-Agent'] = 'TelegramBot (like TwitterBot)';
+    } else if (u.includes('cdninstagram.com') || u.includes('instagram.com')) {
       headers['Referer'] = 'https://www.instagram.com/';
       headers['Origin'] = 'https://www.instagram.com';
-    } else if (u.includes('facebook.com') || u.includes('fbwat.ch')) {
+    } else if (u.includes('fbcdn.net') || u.includes('facebook.com') || u.includes('fbwat.ch')) {
       headers['Referer'] = 'https://www.facebook.com/';
+      headers['User-Agent'] = 'facebookexternalhit/1.1';
     } else if (u.includes('twitter.com') || u.includes('twimg.com') || u.includes('x.com')) {
       headers['Referer'] = 'https://x.com/';
     } else {

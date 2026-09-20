@@ -178,65 +178,133 @@ function extractYoutubeId(url) {
 
 // ─── Instagram Handler ─────────────────────────────────────────────────────
 export async function handleInstagram(url) {
-  // ⚡ Optimized: run Cobalt + scrapers in parallel, take first success
-  const cobaltPromise = fetchViaCobalt(url).then(r => {
-    if (!r) throw new Error('cobalt failed');
-    return { title: 'Instagram Video', author: 'Instagram', thumbnail: '', duration: 0, videoUrl: r.url, picker: r.picker || null };
-  });
-
-  const snapsavePromise = (async () => {
-    const res = await fetch('https://snapsave.app/action.php', {
+  // Method 1: FastDL API (fast, handles Reels, posts, and multi-slide carousels)
+  try {
+    const res = await fetch('https://fastdl.to/api/ajaxSearch', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://snapsave.app',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
-      },
-      body: new URLSearchParams({ url }),
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!res.ok) throw new Error('snapsave failed');
-    const text = await res.text();
-    const mp4Match = text.match(/https?:\/\/[^"'<>\s]+\.mp4[^"'<>\s]*/);
-    if (!mp4Match) throw new Error('no mp4');
-    return { videoUrl: mp4Match[0], title: 'Instagram Video', author: 'Instagram' };
-  })();
-
-  const saveinstaPromise = (async () => {
-    const res = await fetch(`https://v3.saveinsta.app/api/ajaxSearch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://saveinsta.app',
-        'User-Agent': 'Mozilla/5.0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
       },
       body: new URLSearchParams({ q: url, t: 'media', lang: 'en' }),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(12000)
     });
-    if (!res.ok) throw new Error('saveinsta failed');
-    const json = await res.json();
-    if (!json.data) throw new Error('no data');
-    const dataStr = JSON.stringify(json.data);
-    const mp4Match = dataStr.match(/https?:[^"'<>\s]+\.mp4/);
-    if (!mp4Match) throw new Error('no mp4');
-    return { videoUrl: mp4Match[0], title: json.title || 'Instagram Video', author: 'Instagram' };
-  })();
+    if (res.ok) {
+      const json = await res.json();
+      const html = json.data || '';
+      const items = [];
+      const liMatches = [...html.matchAll(/<div class="download-items">([\s\S]*?)<\/li>/gi)];
+      for (const li of liMatches) {
+        const content = li[1];
+        const thumb = content.match(/<img[^>]+src="([^"]+)"/i)?.[1] || '';
+        const video = content.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Video"/i)?.[1] ||
+                      content.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Photo"/i)?.[1];
+        if (video) items.push({ thumbnail: thumb, url: video });
+      }
 
-  try {
-    return await Promise.any([cobaltPromise, snapsavePromise, saveinstaPromise]);
-  } catch {
-    throw new Error('Gagal mengambil video Instagram.');
+      if (items.length === 0) {
+        const singleVideo = html.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Video"/i)?.[1] ||
+                            html.match(/<a[^>]+href="([^"]+)"[^>]*title="Download Photo"/i)?.[1];
+        const singleThumb = html.match(/<img[^>]+src="([^"]+)"/i)?.[1] || '';
+        if (singleVideo) items.push({ thumbnail: singleThumb, url: singleVideo });
+      }
+
+      if (items.length > 0) {
+        return {
+          title: 'Instagram Video',
+          author: 'Instagram',
+          thumbnail: items[0].thumbnail || '',
+          videoUrl: items[0].url,
+          picker: items.length > 1 ? items.map((it, idx) => ({ url: it.url, thumbnail: it.thumbnail, index: idx + 1 })) : null,
+          duration: 0
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('FastDL Instagram failed:', err.message);
   }
+
+  // Method 2: BTCH / backend1 API
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/igdl?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.result || data.data || []);
+      const validItems = list.filter(item => item && (item.url || item.download_url));
+      if (validItems.length > 0) {
+        return {
+          title: 'Instagram Video',
+          author: 'Instagram',
+          thumbnail: validItems[0].thumbnail || '',
+          videoUrl: validItems[0].url || validItems[0].download_url,
+          picker: validItems.length > 1 ? validItems.map((it, idx) => ({ url: it.url || it.download_url, thumbnail: it.thumbnail, index: idx + 1 })) : null,
+          duration: 0
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Instagram failed:', err.message);
+  }
+
+  // Method 3: Cobalt fallback
+  const cobalt = await fetchViaCobalt(url);
+  if (cobalt) {
+    return {
+      title: 'Instagram Video',
+      author: 'Instagram',
+      thumbnail: '',
+      duration: 0,
+      videoUrl: cobalt.url,
+      picker: cobalt.picker || null,
+    };
+  }
+
+  throw new Error('Gagal mengambil video Instagram. Pastikan akun tidak privat dan tautan valid.');
 }
 
 // ─── Facebook Handler ──────────────────────────────────────────────────────
 export async function handleFacebook(url) {
-  const cobaltPromise = fetchViaCobalt(url).then(r => {
-    if (!r) throw new Error('cobalt failed');
-    return { title: 'Facebook Video', author: 'Facebook', thumbnail: '', duration: 0, videoUrl: r.url };
-  });
+  // Method 1: BTCH / backend1 API
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/fbdown?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      let videoUrl = data.HD || data.Normal_video;
+      if (videoUrl) {
+        if (videoUrl.includes('token=')) {
+          try {
+            const token = videoUrl.match(/token=([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/)?.[1];
+            if (token) {
+              const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+              if (payload.url && payload.url.startsWith('http')) {
+                videoUrl = payload.url;
+              }
+            }
+          } catch {}
+        }
 
-  const fdownPromise = (async () => {
+        return {
+          title: data.title || 'Facebook Video',
+          author: 'Facebook',
+          thumbnail: '',
+          duration: 0,
+          videoUrl
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Facebook failed:', err.message);
+  }
+
+  // Method 2: fdown scraper
+  try {
     const res = await fetch('https://fdown.net/download.php', {
       method: 'POST',
       headers: {
@@ -249,55 +317,100 @@ export async function handleFacebook(url) {
       body: new URLSearchParams({ URLz: url }),
       signal: AbortSignal.timeout(10000)
     });
-    if (!res.ok) throw new Error('fdown failed');
-    const text = await res.text();
-    const hdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>HD/i);
-    const sdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>SD/i);
-    const anyMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]+\.mp4[^"]*)"/i);
-    const videoUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
-    if (!videoUrl) throw new Error('no url');
-    return { videoUrl, title: 'Facebook Video', author: 'Facebook' };
-  })();
-
-  try {
-    return await Promise.any([cobaltPromise, fdownPromise]);
-  } catch {
-    throw new Error('Gagal mengambil video Facebook.');
+    if (res.ok) {
+      const text = await res.text();
+      const hdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>HD/i);
+      const sdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>SD/i);
+      const anyMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]+\.mp4[^"]*)"/i);
+      const videoUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
+      if (videoUrl) {
+        return { videoUrl, title: 'Facebook Video', author: 'Facebook', thumbnail: '', duration: 0 };
+      }
+    }
+  } catch (err) {
+    console.warn('fdown failed:', err.message);
   }
+
+  // Method 3: Cobalt fallback
+  const cobalt = await fetchViaCobalt(url);
+  if (cobalt) {
+    return {
+      title: 'Facebook Video',
+      author: 'Facebook',
+      thumbnail: '',
+      duration: 0,
+      videoUrl: cobalt.url,
+    };
+  }
+
+  throw new Error('Gagal mengambil video Facebook. Pastikan video bersifat publik.');
 }
 
 // ─── Twitter Handler ───────────────────────────────────────────────────────
 export async function handleTwitter(url) {
-  const tweetId = url.match(/status\/(\d+)/)?.[1];
-
-  const cobaltPromise = fetchViaCobalt(url).then(r => {
-    if (!r) throw new Error('cobalt failed');
-    return { title: 'Twitter/X Video', author: 'Twitter/X', thumbnail: '', duration: 0, videoUrl: r.url };
-  });
-
-  const fxtwitterPromise = tweetId ? (async () => {
-    const res = await fetch(`https://api.fxtwitter.com/status/${tweetId}`, {
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!res.ok) throw new Error('fxtwitter failed');
-    const json = await res.json();
-    if (!json.tweet?.media?.videos?.length) throw new Error('no video');
-    const video = json.tweet.media.videos[0];
-    return {
-      title: json.tweet.text || 'Twitter/X Video',
-      author: json.tweet.author?.name || 'Twitter User',
-      thumbnail: video.thumbnail_url || '',
-      videoUrl: video.variants?.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url || video.url || '',
-      duration: 0
-    };
-  })() : Promise.reject(new Error('no tweet id'));
-
+  // Method 1: BTCH / backend1 API
   try {
-    return await Promise.any([cobaltPromise, fxtwitterPromise]);
-  } catch {
-    throw new Error('Gagal mengambil video Twitter/X.');
+    const res = await fetch(`https://backend1.tioo.eu.org/twitter?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const urls = Array.isArray(data.url) ? data.url : [];
+      const bestUrl = urls[0]?.hd || urls[0]?.sd || urls[1]?.hd || urls[1]?.sd || (typeof data.url === 'string' ? data.url : '');
+      if (bestUrl) {
+        return {
+          title: data.title || 'Twitter/X Video',
+          author: 'Twitter User',
+          thumbnail: '',
+          duration: 0,
+          videoUrl: bestUrl
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Twitter failed:', err.message);
   }
+
+  // Method 2: fxtwitter embed API
+  const tweetId = url.match(/status\/(\d+)/)?.[1];
+  if (tweetId) {
+    try {
+      const res = await fetch(`https://api.fxtwitter.com/status/${tweetId}`, {
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.tweet?.media?.videos?.length) {
+          const video = json.tweet.media.videos[0];
+          return {
+            title: json.tweet.text || 'Twitter/X Video',
+            author: json.tweet.author?.name || 'Twitter User',
+            thumbnail: video.thumbnail_url || '',
+            videoUrl: video.variants?.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]?.url || video.url || '',
+            duration: 0
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('fxtwitter failed:', err.message);
+    }
+  }
+
+  // Method 3: Cobalt fallback
+  const cobalt = await fetchViaCobalt(url);
+  if (cobalt) {
+    return {
+      title: 'Twitter/X Video',
+      author: 'Twitter/X',
+      thumbnail: '',
+      duration: 0,
+      videoUrl: cobalt.url,
+    };
+  }
+
+  throw new Error('Gagal mengambil video Twitter/X. Pastikan postingan memiliki video dan tidak dikunci.');
 }
 
 // ─── TikTok Handler ────────────────────────────────────────────────────────
