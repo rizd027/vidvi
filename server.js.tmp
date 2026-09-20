@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
@@ -13,10 +13,10 @@ const execFileAsync = promisify(execFile);
 
 // Prevent unhandled stream errors from crashing the whole server
 process.on('uncaughtException', (err) => {
-  console.error('⚠️  Uncaught Exception (server kept alive):', err.message);
+  console.error('âš ï¸  Uncaught Exception (server kept alive):', err.message);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('⚠️  Unhandled Rejection (server kept alive):', reason);
+  console.error('âš ï¸  Unhandled Rejection (server kept alive):', reason);
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,7 +38,7 @@ const COBALT_INSTANCES = [
 app.use(cors());
 app.use(express.json());
 
-// ─── SQLite Initialization ─────────────────────────────────────────────────
+// â”€â”€â”€ SQLite Initialization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let db;
 async function initDb() {
   db = await open({
@@ -75,7 +75,7 @@ initDb().catch((err) => {
   console.error('Failed to initialize database:', err);
 });
 
-// ─── Localization ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Localization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const messages = {
   en: {
     urlRequired: 'URL query parameter is required',
@@ -111,7 +111,7 @@ const messages = {
   }
 };
 
-// ─── Resolve Short URL Redirects ───────────────────────────────────────────
+// â”€â”€â”€ Resolve Short URL Redirects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function resolveUrl(url) {
   try {
     const urlLower = url.toLowerCase();
@@ -137,7 +137,7 @@ async function resolveUrl(url) {
   }
 }
 
-// ─── Platform Validation ──────────────────────────────────────────────────
+// â”€â”€â”€ Platform Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function validateUrl(platform, url, lang = 'id') {
   const t = messages[lang] || messages['en'];
   const u = url.toLowerCase();
@@ -196,7 +196,7 @@ function validateUrl(platform, url, lang = 'id') {
   }
 }
 
-// ─── Cobalt API Helper ─────────────────────────────────────────────────────
+// â”€â”€â”€ Cobalt API Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function fetchViaCobalt(url) {
   for (const instance of COBALT_INSTANCES) {
     try {
@@ -228,7 +228,7 @@ async function fetchViaCobalt(url) {
   return null;
 }
 
-// ─── yt-dlp Helper ────────────────────────────────────────────────────────
+// â”€â”€â”€ yt-dlp Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function fetchViaYtdlp(url, opts = {}) {
   if (!HAS_YTDLP) throw new Error('yt-dlp not available');
 
@@ -261,7 +261,7 @@ async function fetchViaYtdlp(url, opts = {}) {
   }
 }
 
-// ─── YouTube Handler ───────────────────────────────────────────────────────
+// â”€â”€â”€ YouTube Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleYoutube(url) {
   // Primary: yt-dlp (best quality metadata)
   try {
@@ -309,7 +309,7 @@ async function handleYoutube(url) {
   }
 }
 
-// ─── Instagram Handler ─────────────────────────────────────────────────────
+// â”€â”€â”€ Instagram Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleInstagram(url) {
   // Try Cobalt first
   const cobalt = await fetchViaCobalt(url);
@@ -379,7 +379,7 @@ async function handleInstagram(url) {
   throw new Error('Failed to fetch Instagram video. Instagram blocks unauthenticated server access. Try using a browser extension or logging in.');
 }
 
-// ─── Facebook Handler ──────────────────────────────────────────────────────
+// â”€â”€â”€ Facebook Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleFacebook(url) {
   // Try Cobalt first
   const cobalt = await fetchViaCobalt(url);
@@ -432,7 +432,7 @@ async function handleFacebook(url) {
   throw new Error('Failed to fetch Facebook video. Facebook blocks unauthenticated server access.');
 }
 
-// ─── Twitter Handler ───────────────────────────────────────────────────────
+// â”€â”€â”€ Twitter Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleTwitter(url) {
   // Try Cobalt first
   const cobalt = await fetchViaCobalt(url);
@@ -504,7 +504,7 @@ async function handleTwitter(url) {
   throw new Error('Failed to fetch Twitter/X video. Twitter heavily restricts server-side access without authentication.');
 }
 
-// ─── TikTok Handler ────────────────────────────────────────────────────────
+// â”€â”€â”€ TikTok Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleTikTok(url, resolvedUrl, lang) {
   const t = messages[lang] || messages['en'];
 
@@ -620,7 +620,7 @@ async function handleTikTok(url, resolvedUrl, lang) {
   throw new Error('Failed to fetch TikTok video. Please try another link.');
 }
 
-// ─── Main Download Route ───────────────────────────────────────────────────
+// â”€â”€â”€ Main Download Route â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SUPPORTED_PLATFORMS = ['capcut', 'spotify', 'tiktok', 'youtube', 'instagram', 'facebook', 'twitter'];
 
 app.get('/api/download/:platform', async (req, res) => {
@@ -648,7 +648,7 @@ app.get('/api/download/:platform', async (req, res) => {
     let result = {};
     let dbTitle = '', dbThumbnail = '', dbDownloadUrl = '', dbDuration = '', dbSize = 'Unknown', mediaType = 'video';
 
-    // ── Spotify ──
+    // â”€â”€ Spotify â”€â”€
     if (platform === 'spotify') {
       const apiUrl = `https://bintangapi.my.id/api/downloader/spotify?url=${encodeURIComponent(resolvedUrl)}`;
       const response = await fetch(apiUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -667,7 +667,7 @@ app.get('/api/download/:platform', async (req, res) => {
       dbDownloadUrl = result.downloadUrl; dbDuration = result.duration; mediaType = 'audio';
     }
 
-    // ── CapCut ──
+    // â”€â”€ CapCut â”€â”€
     else if (platform === 'capcut') {
       const apiUrl = `https://bintangapi.my.id/api/downloader/capcut?url=${encodeURIComponent(resolvedUrl)}`;
       const response = await fetch(apiUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -684,7 +684,7 @@ app.get('/api/download/:platform', async (req, res) => {
       dbDownloadUrl = result.video; dbSize = result.size || 'Unknown';
     }
 
-    // ── TikTok ──
+    // â”€â”€ TikTok â”€â”€
     else if (platform === 'tiktok') {
       const tResult = await handleTikTok(url, resolvedUrl, lang);
       result = tResult;
@@ -692,7 +692,7 @@ app.get('/api/download/:platform', async (req, res) => {
       dbDownloadUrl = result.video || result.audio; dbDuration = result.duration?.toString() || '';
     }
 
-    // ── YouTube ──
+    // â”€â”€ YouTube â”€â”€
     else if (platform === 'youtube') {
       const ytResult = await handleYoutube(resolvedUrl);
       result = ytResult;
@@ -700,7 +700,7 @@ app.get('/api/download/:platform', async (req, res) => {
       dbDownloadUrl = result.videoUrl; dbDuration = result.duration?.toString() || ''; mediaType = 'video';
     }
 
-    // ── Instagram ──
+    // â”€â”€ Instagram â”€â”€
     else if (platform === 'instagram') {
       const igResult = await handleInstagram(resolvedUrl);
       result = igResult;
@@ -708,7 +708,7 @@ app.get('/api/download/:platform', async (req, res) => {
       dbDownloadUrl = result.videoUrl; dbDuration = result.duration?.toString() || ''; mediaType = 'video';
     }
 
-    // ── Facebook ──
+    // â”€â”€ Facebook â”€â”€
     else if (platform === 'facebook') {
       const fbResult = await handleFacebook(resolvedUrl);
       result = fbResult;
@@ -716,7 +716,7 @@ app.get('/api/download/:platform', async (req, res) => {
       dbDownloadUrl = result.videoUrl; dbDuration = result.duration?.toString() || ''; mediaType = 'video';
     }
 
-    // ── Twitter ──
+    // â”€â”€ Twitter â”€â”€
     else if (platform === 'twitter') {
       const twResult = await handleTwitter(resolvedUrl);
       result = twResult;
@@ -727,15 +727,15 @@ app.get('/api/download/:platform', async (req, res) => {
     // History is tracked client-side (localStorage via historyStore) to avoid duplication.
     // SQLite is retained for settings only.
 
-    console.log(`✅ Successfully processed ${platform}: ${dbTitle}`);
+    console.log(`âœ… Successfully processed ${platform}: ${dbTitle}`);
     res.json({ status: true, result });
   } catch (error) {
-    console.error(`❌ Error processing ${platform}:`, error.message);
+    console.error(`âŒ Error processing ${platform}:`, error.message);
     res.status(200).json({ status: false, message: error.message });
   }
 });
 
-// ─── History Routes (kept for backwards compat, client uses localStorage) ──
+// â”€â”€â”€ History Routes (kept for backwards compat, client uses localStorage) â”€â”€
 app.get('/api/history', async (req, res) => {
   if (!db) return res.status(503).json({ status: false, message: 'Database not ready yet' });
   try {
@@ -765,180 +765,4 @@ app.delete('/api/history/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({ status: false, message: error.message });
   }
-});
-
-// ─── Settings Routes ───────────────────────────────────────────────────────
-app.get('/api/settings', async (req, res) => {
-  if (!db) return res.status(503).json({ status: false, message: 'Database not ready yet' });
-  try {
-    const rows = await db.all('SELECT * FROM settings');
-    const settingsMap = {};
-    rows.forEach((row) => { settingsMap[row.key] = row.value; });
-    res.json({ status: true, data: settingsMap });
-  } catch (error) {
-    res.status(500).json({ status: false, message: error.message });
-  }
-});
-
-app.post('/api/settings', async (req, res) => {
-  if (!db) return res.status(503).json({ status: false, message: 'Database not ready yet' });
-  const { key, value } = req.body;
-  if (!key || value === undefined) {
-    return res.status(400).json({ status: false, message: 'Key and value are required' });
-  }
-  try {
-    await db.run(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      [key, value]
-    );
-    res.json({ status: true, message: 'Settings saved successfully' });
-  } catch (error) {
-    res.status(500).json({ status: false, message: error.message });
-  }
-});
-
-// ─── Proxy Download Route ──────────────────────────────────────────────────
-// Streams a remote URL through the server so the browser triggers a real
-// "Save file" dialog instead of opening a new tab.
-app.get('/api/proxy-download', async (req, res) => {
-  const { url, filename } = req.query;
-  if (!url) return res.status(400).json({ status: false, message: 'url is required' });
-
-  try {
-    const decodedUrl = decodeURIComponent(url);
-    console.log(`⬇️  Proxy download: ${decodedUrl.slice(0, 80)}...`);
-
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'identity',
-      'Connection': 'keep-alive',
-    };
-
-    // Forward Range header for resume support
-    if (req.headers['range']) {
-      headers['Range'] = req.headers['range'];
-    }
-
-    // Set correct Referer based on CDN origin
-    const u = decodedUrl.toLowerCase();
-    if (u.includes('googlevideo.com') || u.includes('youtube.com')) {
-      headers['Referer'] = 'https://www.youtube.com/';
-      headers['Origin'] = 'https://www.youtube.com';
-    } else if (u.includes('tiktokcdn.com') || u.includes('tiktok.com') || u.includes('muscdn.com')) {
-      headers['Referer'] = 'https://www.tiktok.com/';
-      headers['Origin'] = 'https://www.tiktok.com';
-    } else if (u.includes('cdninstagram.com') || u.includes('instagram.com') || u.includes('fbcdn.net')) {
-      headers['Referer'] = 'https://www.instagram.com/';
-      headers['Origin'] = 'https://www.instagram.com';
-    } else if (u.includes('facebook.com') || u.includes('fbwat.ch')) {
-      headers['Referer'] = 'https://www.facebook.com/';
-    } else if (u.includes('twitter.com') || u.includes('twimg.com') || u.includes('x.com')) {
-      headers['Referer'] = 'https://x.com/';
-    } else {
-      try {
-        const parsedUrl = new URL(decodedUrl);
-        headers['Referer'] = parsedUrl.origin + '/';
-      } catch (e) {
-        headers['Referer'] = 'https://www.google.com/';
-      }
-    }
-
-    const upstream = await fetch(decodedUrl, {
-      headers,
-      signal: AbortSignal.timeout(60000),
-    });
-
-    if (!upstream.ok) {
-      console.error(`Upstream ${upstream.status} for: ${decodedUrl.slice(0, 120)}`);
-      return res.status(upstream.status).json({ status: false, message: `Upstream returned ${upstream.status}: ${upstream.statusText}` });
-    }
-
-    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
-    const contentLength = upstream.headers.get('content-length');
-
-    // Determine a safe filename
-    let safeFilename = filename
-      ? decodeURIComponent(filename)
-      : 'download';
-
-    // Strip query strings from filename if needed
-    safeFilename = safeFilename.split('?')[0];
-
-    // Correct extension based on actual content-type from upstream
-    // This fixes cases where yt-dlp audio is M4A but caller requested .mp3
-    const extMap = {
-      'audio/mp4': 'm4a',
-      'audio/x-m4a': 'm4a',
-      'audio/mp3': 'mp3',
-      'audio/mpeg': 'mp3',
-      'audio/ogg': 'ogg',
-      'audio/opus': 'opus',
-      'audio/webm': 'webm',
-      'video/mp4': 'mp4',
-      'video/webm': 'webm',
-      'video/x-matroska': 'mkv',
-    };
-    const detectedExt = Object.entries(extMap).find(([mime]) => contentType.startsWith(mime))?.[1];
-
-    // Only add extension if completely missing — never override a valid extension the caller provided
-    if (!safeFilename.includes('.')) {
-      safeFilename += '.' + (detectedExt || 'mp4');
-    }
-
-    res.setHeader('Content-Type', contentType);
-    // Forward upstream range response status
-    if (upstream.status === 206) {
-      res.status(206);
-      const cr = upstream.headers.get('content-range');
-      if (cr) res.setHeader('Content-Range', cr);
-      res.setHeader('Accept-Ranges', 'bytes');
-    }
-    if (req.query.inline === 'true') {
-      res.setHeader('Content-Disposition', 'inline');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-    } else {
-      // Use RFC 5987 encoding to safely handle unicode filenames (CJK, Arabic, etc.)
-      const asciiName = safeFilename.replace(/[^\x20-\x7E]/g, '_').replace(/\s+/g, '_').replace(/"/g, '');
-      const encodedName = encodeURIComponent(safeFilename);
-      res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
-      res.setHeader('Cache-Control', 'no-cache');
-    }
-    if (contentLength) res.setHeader('Content-Length', contentLength);
-
-    // Stream the upstream body to the Express response using Node.js Readable
-    // This is more stable than Web Streams pipeTo() which can crash the process on timeout
-    const nodeStream = Readable.fromWeb(upstream.body);
-
-    nodeStream.on('error', (err) => {
-      console.error('Proxy stream error:', err.message);
-      if (!res.writableEnded) res.end();
-    });
-
-    req.on('close', () => {
-      nodeStream.destroy();
-    });
-
-    nodeStream.pipe(res);
-  } catch (error) {
-    console.error('Proxy download error:', error.message);
-    if (!res.headersSent) {
-      res.status(500).json({ status: false, message: 'Proxy download failed: ' + error.message });
-    }
-  }
-});
-app.use(express.static(path.join(__dirname, 'dist')));
-
-app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api')) {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-  } else {
-    res.status(404).json({ status: false, message: 'API endpoint not found' });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📦 yt-dlp: ${HAS_YTDLP ? '✅ available' : '❌ not found'}`);
 });

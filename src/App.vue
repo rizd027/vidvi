@@ -66,6 +66,9 @@ const initializeApp = async () => {
     }
   } catch (error) {
     console.error('Failed to initialize app settings:', error)
+  } finally {
+    // BUG-11: mark settings as loaded so Settings.vue won't double-fetch
+    appStore.settingsLoaded = true
   }
 }
 

@@ -59,7 +59,9 @@ const messages = {
     autoPasteDownloadDesc: 'Automatically paste link from clipboard and download when app is opened or focused',
     autoPasted: 'Link pasted automatically!',
     on: 'On',
-    off: 'Off'
+    off: 'Off',
+    searchHistory: 'Search history...',
+    filterAll: 'All'
   },
   id: {
     title: 'Vidvi Downloader',
@@ -119,7 +121,9 @@ const messages = {
     autoPasteDownloadDesc: 'Tempel tautan dari papan klip dan unduh otomatis saat aplikasi dibuka atau difokuskan',
     autoPasted: 'Tautan ditempel secara otomatis!',
     on: 'Aktif',
-    off: 'Nonaktif'
+    off: 'Nonaktif',
+    searchHistory: 'Cari riwayat...',
+    filterAll: 'Semua'
   }
 };
 

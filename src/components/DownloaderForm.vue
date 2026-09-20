@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -19,13 +19,15 @@ const selectedPlatform = ref<Platform>('')
 const fetchTriggered = ref(false)
 
 // Handle prefilled URL from store (e.g. from history page)
-watch(() => appStore.activeTab, (newTab) => {
+watch(() => appStore.activeTab, async (newTab) => {
   if (newTab === 'downloader' && appStore.prefilledUrl) {
     inputUrl.value = appStore.prefilledUrl
     selectedPlatform.value = appStore.prefilledPlatform as any
     appStore.prefilledUrl = ''
     appStore.prefilledPlatform = ''
-    setTimeout(() => { handleSearch() }, 50)
+    // Wait for Vue to flush reactive updates before triggering search
+    await nextTick()
+    handleSearch()
   }
 }, { immediate: true })
 
@@ -76,11 +78,14 @@ const { data: mediaData, error, isLoading, refetch } = useQuery({
   queryKey: computed(() => ['download', selectedPlatform.value, inputUrl.value]),
   queryFn: fetchMedia,
   enabled: fetchTriggered,
-  retry: false
+  retry: false,
+  staleTime: 0,     // BUG-01: never use cache — always re-fetch
+  gcTime: 0,        // BUG-01: discard cached data immediately
 })
 
 const handleSearch = () => {
   if (!isValidUrl.value) { message.error(t('invalidUrl')); return }
+  isVideoPlaying.value = false  // BUG-09: reset video player before new fetch
   currentStep.value = 2
   fetchTriggered.value = true
   refetch()
@@ -131,14 +136,15 @@ watch([isLoading, mediaData, error], ([loading, data, err]) => {
 
 const activePhotoIndex = ref<number | null>(null)
 
-const handlePhotoClick = (idx: string | number, imgUrl: string, filename: string) => {
+// BUG-06/07: Centralize photo click — overlay button is the single download trigger.
+// Clicking a photo simply highlights it; the overlay download button does the work.
+const handlePhotoClick = (idx: string | number) => {
   const numIdx = Number(idx)
-  if (activePhotoIndex.value === numIdx) {
-    proxyDownload(imgUrl, filename)
-    activePhotoIndex.value = null
-  } else {
-    activePhotoIndex.value = numIdx
-  }
+  activePhotoIndex.value = activePhotoIndex.value === numIdx ? null : numIdx
+}
+
+const clearActivePhoto = () => {
+  activePhotoIndex.value = null
 }
 
 const getProxyUrl = (url: string | undefined, inline = false) => {
@@ -298,9 +304,8 @@ const pasteAndDownload = async () => {
     if (text) {
       const url = text.trim()
       inputUrl.value = url
-      setTimeout(() => {
-        handleSearch()
-      }, 50)
+      await nextTick()
+      handleSearch()
     } else {
       message.warning(t('clipboardError') || 'Papan klip kosong.')
     }
@@ -336,9 +341,8 @@ const checkAutoPaste = async () => {
       if (isSupported) {
         inputUrl.value = url
         message.info(t('autoPasted'))
-        setTimeout(() => {
-          handleSearch()
-        }, 100)
+        await nextTick()
+        handleSearch()
       }
     }
   } catch (error) {
@@ -434,6 +438,7 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
             class="platform-badge"
             :class="{ active: selectedPlatform === p.id }"
             :style="selectedPlatform === p.id ? `--active-color: ${p.color}` : ''"
+            @click="selectedPlatform = (p.id as Platform)"
           >
             <span class="platform-icon">
               <!-- YouTube -->
@@ -530,13 +535,13 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
                   :key="idx"
                   class="photo-item"
                   :class="{ 'photo-active': activePhotoIndex === idx }"
-                  @click="handlePhotoClick(idx, imgUrl, `${tiktokResult!.title}_foto${Number(idx) + 1}.jpg`)"
+                  @click="handlePhotoClick(idx)"
                 >
                   <img :src="imgUrl" :alt="`Foto ${Number(idx) + 1}`" class="photo-thumb" referrerpolicy="no-referrer" />
                   <div class="photo-overlay">
                     <button
                       class="photo-center-dl-btn"
-                      @click.stop="proxyDownload(imgUrl, `${tiktokResult!.title}_foto${Number(idx) + 1}.jpg`); activePhotoIndex = null"
+                      @click.stop="proxyDownload(imgUrl, `${tiktokResult!.title}_foto${Number(idx) + 1}.jpg`); clearActivePhoto()"
                       :title="`Unduh foto ${Number(idx) + 1}`"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -555,7 +560,7 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 {{ t('downloadAllPhotos') }} ({{ tiktokResult.images.length }})
               </button>
-              <button v-if="tiktokResult.audioUrl" class="btn-download secondary" @click="proxyDownload(tiktokResult.audioUrl, tiktokResult.title + '.mp3')">
+              <button v-if="tiktokResult.audioUrl" class="btn-download secondary" @click="proxyDownload(tiktokResult.audioUrl, tiktokResult.title + '.m4a')">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
                 {{ t('audioOnly') }}
               </button>
@@ -600,7 +605,7 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 {{ t('videoWatermark') }}
               </button>
-              <button v-if="tiktokResult.audioUrl" class="btn-download secondary" @click="proxyDownload(tiktokResult.audioUrl, tiktokResult.title + '.mp3')">
+              <button v-if="tiktokResult.audioUrl" class="btn-download secondary" @click="proxyDownload(tiktokResult.audioUrl, tiktokResult.title + '.m4a')">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
                 {{ t('audioOnly') }}
               </button>
@@ -651,23 +656,11 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
           </div>
         </div>
 
-        <!-- YouTube Result -->
+        <!-- YouTube Result — no embedded video preview because signed URLs expire quickly.
+             User can click thumbnail to visit YouTube, or download directly. -->
         <div v-if="selectedPlatform === 'youtube' && youtubeResult" class="media-details">
-          <div class="cover-wrapper wide video-wrapper" v-if="youtubeResult.videoUrl || youtubeResult.thumbnail">
-            <template v-if="!isVideoPlaying && youtubeResult.thumbnail">
-              <img :src="youtubeResult.thumbnail" alt="Thumbnail" class="media-cover" referrerpolicy="no-referrer" />
-              <button class="play-overlay-btn" @click="isVideoPlaying = true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-              </button>
-            </template>
-            <video 
-              v-else
-              :src="getProxyUrl(youtubeResult.videoUrl, true)"
-              controls
-              autoplay
-              playsinline
-              class="media-video"
-            ></video>
+          <div class="cover-wrapper wide" v-if="youtubeResult.thumbnail">
+            <img :src="youtubeResult.thumbnail" alt="Thumbnail" class="media-cover" referrerpolicy="no-referrer" />
           </div>
           <div class="meta-info">
             <h2>{{ youtubeResult.title }}</h2>

@@ -76,7 +76,7 @@ const formatDate = (dateStr: string) => {
           v-model="searchQuery" 
           type="text" 
           class="search-input" 
-          placeholder="Cari riwayat..."
+          :placeholder="t('searchHistory')"
         />
         
         <div class="filter-tabs">
@@ -87,7 +87,7 @@ const formatDate = (dateStr: string) => {
             :class="{ active: activeFilter === filter }"
             @click="activeFilter = filter"
           >
-            {{ filter === 'all' ? 'Semua' : filter.charAt(0).toUpperCase() + filter.slice(1) }}
+            {{ filter === 'all' ? t('filterAll') : filter.charAt(0).toUpperCase() + filter.slice(1) }}
           </button>
         </div>
       </div>
@@ -107,7 +107,7 @@ const formatDate = (dateStr: string) => {
         <div class="item-media">
           <img v-if="item.thumbnail" :src="item.thumbnail" class="item-thumb" alt="Thumb" referrerpolicy="no-referrer" />
           <div v-else class="item-thumb-placeholder" :class="item.platform">
-            {{ item.platform[0].toUpperCase() }}
+            {{ (item.platform?.[0] || '?').toUpperCase() }}
           </div>
         </div>
 

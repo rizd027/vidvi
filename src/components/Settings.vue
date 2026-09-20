@@ -13,8 +13,17 @@ const languageOpt = ref<'id' | 'en'>(appStore.currentLanguage)
 const themeOpt = ref<'light' | 'dark'>(appStore.themeMode)
 const autoPasteOpt = ref<boolean>(appStore.autoPasteDownload)
 
-// Fetch saved settings from DB on mount
+// Fetch saved settings from DB on mount — only if App.vue has not already loaded them.
+// If App.vue already populated appStore (settingsLoaded=true), we just read from the store.
 const loadSettings = async () => {
+  if (appStore.settingsLoaded) {
+    // Sync local refs from already-loaded store values
+    languageOpt.value = appStore.currentLanguage
+    themeOpt.value = appStore.themeMode
+    autoPasteOpt.value = appStore.autoPasteDownload
+    applyTheme(appStore.themeMode)
+    return
+  }
   try {
     const res = await fetch('/api/settings')
     if (res.ok) {
