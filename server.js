@@ -369,8 +369,36 @@ async function handleYoutube(url) {
     };
 
   } catch (ytdlpErr) {
-    console.warn('yt-dlp failed for YouTube, trying Cobalt:', ytdlpErr.message.slice(0, 100));
-    // Fallback: Cobalt
+    console.warn('yt-dlp failed for YouTube, trying BTCH / Cobalt fallback:', ytdlpErr.message.slice(0, 100));
+    // Fallback 1: BTCH / backend1
+    try {
+      const res = await fetch(`https://backend1.tioo.eu.org/youtube?url=${encodeURIComponent(url)}`, {
+        headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+        signal: AbortSignal.timeout(15000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status && (data.mp4 || data.mp3)) {
+          const videoFormats = data.mp4 ? [{ quality: 'HD / 720p', height: 720, url: data.mp4, ext: 'mp4', hasAudio: true, filesize: null }] : [];
+          const audioFormats = data.mp3 ? [{ label: 'Audio MP3', url: data.mp3, ext: 'mp3', abr: 128, filesize: null }] : [];
+          return {
+            title: data.title || 'YouTube Video',
+            author: data.author || 'YouTube',
+            thumbnail: data.thumbnail || '',
+            duration: 0,
+            videoUrl: data.mp4 || '',
+            audioUrl: data.mp3 || '',
+            audioExt: 'mp3',
+            videoFormats,
+            audioFormats
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('BTCH YouTube fallback failed:', e.message);
+    }
+
+    // Fallback 2: Cobalt
     const cobalt = await fetchViaCobalt(url);
     if (cobalt) {
       return {

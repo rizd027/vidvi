@@ -153,6 +153,41 @@ export async function fetchViaCobalt(url, mode = 'auto') {
 
 // ─── YouTube Handler ───────────────────────────────────────────────────────
 export async function handleYoutube(url) {
+  // Method 1: BTCH / backend1 API (fast & returns both mp4 and mp3)
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/youtube?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status && (data.mp4 || data.mp3)) {
+        const videoFormats = [];
+        if (data.mp4) {
+          videoFormats.push({ quality: 'HD / 720p', height: 720, url: data.mp4, ext: 'mp4', hasAudio: true, filesize: null });
+        }
+        const audioFormats = [];
+        if (data.mp3) {
+          audioFormats.push({ label: 'Audio MP3', url: data.mp3, ext: 'mp3', abr: 128, filesize: null });
+        }
+        return {
+          title: data.title || 'YouTube Video',
+          author: data.author || 'YouTube',
+          thumbnail: data.thumbnail || `https://img.youtube.com/vi/${extractYoutubeId(url)}/hqdefault.jpg`,
+          duration: 0,
+          videoUrl: data.mp4 || '',
+          audioUrl: data.mp3 || '',
+          audioExt: 'mp3',
+          videoFormats,
+          audioFormats
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH YouTube failed:', err.message);
+  }
+
+  // Method 2: Cobalt fallback
   const cobalt = await fetchViaCobalt(url, 'auto');
   if (cobalt) {
     let audioUrl = '';
@@ -181,6 +216,7 @@ export async function handleYoutube(url) {
       ]
     };
   }
+
   throw new Error('Gagal mengambil video YouTube. Coba tautan lain atau gunakan format yang berbeda.');
 }
 

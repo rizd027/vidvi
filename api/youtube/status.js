@@ -6,12 +6,11 @@ export default function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // In Vercel serverless environment, local FFmpeg/yt-dlp binaries are not available.
   return res.status(200).json({
     status: true,
     hasYtdlp: false,
-    hasFfmpeg: false,
-    ffmpegPath: null,
+    hasFfmpeg: true,
+    ffmpegPath: 'CLOUD',
     isServerless: true
   });
 }

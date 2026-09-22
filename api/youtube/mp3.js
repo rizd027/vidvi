@@ -15,8 +15,34 @@ export default async function handler(req, res) {
   const safeTitle = (title ? decodeURIComponent(title) : 'youtube-audio')
     .replace(/[^\w\s.-]/g, '_').replace(/\s+/g, '_').slice(0, 120);
 
+  // Method 1: backend1.tioo.eu.org (fast & reliable MP3 stream)
   try {
-    // Attempt remote audio extraction via Cobalt if available
+    const tiooRes = await fetch(`https://backend1.tioo.eu.org/youtube?url=${encodeURIComponent(decodedUrl)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (tiooRes.ok) {
+      const data = await tiooRes.json();
+      if (data.status && data.mp3) {
+        const audioRes = await fetch(data.mp3, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+        if (audioRes.ok) {
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeTitle)}.mp3"`);
+          const arrayBuffer = await audioRes.arrayBuffer();
+          return res.status(200).send(Buffer.from(arrayBuffer));
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('BTCH MP3 error:', e.message);
+  }
+
+  // Method 2: Cobalt audio fallback
+  try {
     const cobalt = await fetchViaCobalt(decodedUrl, 'audio');
     if (cobalt?.url) {
       const audioRes = await fetch(cobalt.url, {
@@ -35,7 +61,7 @@ export default async function handler(req, res) {
     console.warn('Cobalt audio fallback error:', err.message);
   }
 
-  // If serverless cannot transcode via local ffmpeg
+  // If serverless cannot transcode via local ffmpeg and remote sources fail
   return res.status(422).json({
     status: false,
     message: 'Konversi MP3 membutuhkan FFmpeg di server lokal. Silakan gunakan format audio langsung atau jalankan Vidvi secara lokal.'
