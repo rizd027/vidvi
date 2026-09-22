@@ -30,6 +30,28 @@ const PORT = process.env.PORT || 3000;
 const YTDLP_PATH = path.join(__dirname, 'yt-dlp.exe');
 const HAS_YTDLP = existsSync(YTDLP_PATH);
 
+// Helper to find ffmpeg binary in common locations
+function findFfmpegPath() {
+  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+  const localApp = process.env.LOCALAPPDATA || '';
+  const userProfile = process.env.USERPROFILE || '';
+  const candidates = [
+    path.join(__dirname, 'ffmpeg.exe'),
+    path.join(__dirname, 'bin', 'ffmpeg.exe'),
+    path.join(localApp, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'),
+    path.join(userProfile, 'scoop', 'shims', 'ffmpeg.exe'),
+    'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe',
+    'C:\\ffmpeg\\bin\\ffmpeg.exe',
+    'C:\\ffmpeg\\ffmpeg.exe'
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
+}
+
 // Working Cobalt instances (tested & verified)
 const COBALT_INSTANCES = [
   'https://kitty.tame.gg',
@@ -932,6 +954,28 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// ─── YouTube Tools Status Route ───────────────────────────────────────────
+app.get('/api/youtube/status', async (req, res) => {
+  const ffmpegLocation = findFfmpegPath();
+  let hasFfmpeg = !!ffmpegLocation;
+
+  if (!hasFfmpeg) {
+    try {
+      await execFileAsync('ffmpeg', ['-version']);
+      hasFfmpeg = true;
+    } catch {
+      hasFfmpeg = false;
+    }
+  }
+
+  res.json({
+    status: true,
+    hasYtdlp: HAS_YTDLP,
+    hasFfmpeg,
+    ffmpegPath: ffmpegLocation || (hasFfmpeg ? 'PATH' : null)
+  });
+});
+
 // ─── YouTube MP3 Conversion Route ─────────────────────────────────────────
 // Uses a temp file strategy: yt-dlp writes the converted MP3 to a temp file,
 // then the server streams the file to the browser and deletes it on finish.
@@ -941,6 +985,22 @@ app.get('/api/youtube/mp3', async (req, res) => {
   const { url, title } = req.query;
   if (!url) return res.status(400).json({ status: false, message: 'url is required' });
   if (!HAS_YTDLP) return res.status(503).json({ status: false, message: 'yt-dlp tidak tersedia di server ini.' });
+
+  // Verify ffmpeg availability upfront before starting conversion
+  const ffmpegLocation = findFfmpegPath();
+  if (!ffmpegLocation) {
+    let hasSystemFfmpeg = false;
+    try {
+      await execFileAsync('ffmpeg', ['-version']);
+      hasSystemFfmpeg = true;
+    } catch {}
+    if (!hasSystemFfmpeg) {
+      return res.status(422).json({
+        status: false,
+        message: 'ffmpeg tidak ditemukan di server. Install ffmpeg untuk mengaktifkan konversi MP3.'
+      });
+    }
+  }
 
   const decodedUrl = decodeURIComponent(url);
   const safeTitle = (title ? decodeURIComponent(title) : 'youtube-audio')
@@ -962,10 +1022,14 @@ app.get('/api/youtube/mp3', async (req, res) => {
     '--extract-audio',
     '--audio-format', 'mp3',
     '--audio-quality', '0',
-    '--no-warnings',
-    '-o', tmpBase + '.%(ext)s',    // write to temp file (not stdout)
-    decodedUrl
+    '--no-warnings'
   ];
+
+  if (ffmpegLocation) {
+    args.push('--ffmpeg-location', ffmpegLocation);
+  }
+
+  args.push('-o', tmpBase + '.%(ext)s', decodedUrl);
 
   let errorBuffer = '';
 

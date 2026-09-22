@@ -414,49 +414,58 @@ onUnmounted(() => {
 })
 
 // ── YouTube MP3 Download ──
-// Uses direct href navigation so the browser handles streaming natively.
-// The old fetch+blob approach buffered the entire file into RAM, causing
-// timeouts and out-of-memory errors on long videos.
 async function downloadMp3() {
   if (!youtubeResult.value || downloadingMp3.value) return
   const ytUrl = inputUrl.value.trim()
   if (!ytUrl) return
 
   downloadingMp3.value = true
-  message.loading('Memulai konversi MP3... Mohon tunggu', { duration: 4000 })
 
   try {
-    const apiUrl = `/api/youtube/mp3?url=${encodeURIComponent(ytUrl)}&title=${encodeURIComponent(youtubeResult.value.title)}`
+    // 1. Cek kesiapan FFmpeg di server secara instan
+    const statusRes = await fetch('/api/youtube/status').catch(() => null)
+    if (statusRes && statusRes.ok) {
+      const statusData = await statusRes.json().catch(() => null)
+      if (statusData && !statusData.hasFfmpeg) {
+        message.warning('FFmpeg belum aktif di server. Silakan gunakan pilihan format audio langsung (M4A/WebM) di atas.', { duration: 6000 })
+        downloadingMp3.value = false
+        return
+      }
+    }
 
-    // First do a HEAD-like check: ping the endpoint to see if it's reachable
-    // and yt-dlp + ffmpeg are available, before triggering the browser download.
-    // We use a short fetch to /api/youtube/mp3 with a signal timeout.
-    // If the server returns a JSON error (non-ok), show it. Otherwise trigger download.
-    const checkRes = await fetch(apiUrl, {
-      headers: { 'Accept': 'application/json, audio/mpeg, */*' },
-      signal: AbortSignal.timeout(8000)
-    }).catch(() => null)
+    message.loading('Mengkonversi audio YouTube ke MP3... Mohon tunggu', { duration: 6000 })
 
-    // If server returned a JSON error before starting the stream
-    if (checkRes && !checkRes.ok) {
-      let errMsg = 'Konversi MP3 gagal.'
-      const ct = checkRes.headers.get('content-type') || ''
+    const safeTitle = (youtubeResult.value.title || 'youtube-audio')
+      .replace(/[^\w\s.-]/g, '_').replace(/\s+/g, '_').slice(0, 120)
+    const apiUrl = `/api/youtube/mp3?url=${encodeURIComponent(ytUrl)}&title=${encodeURIComponent(safeTitle)}`
+
+    // 2. Fetch file dari endpoint konversi
+    const res = await fetch(apiUrl)
+    if (!res.ok) {
+      let errMsg = 'Gagal mengkonversi MP3.'
+      const ct = res.headers.get('content-type') || ''
       if (ct.includes('application/json')) {
-        try { const j = await checkRes.json(); errMsg = j.message || errMsg } catch {}
+        try {
+          const j = await res.json()
+          if (j.message) errMsg = j.message
+        } catch {}
       }
       throw new Error(errMsg)
     }
 
-    // Server is processing — trigger the actual browser download via anchor
-    message.destroyAll()
-    message.info('Sedang mengunduh MP3... Browser akan menyimpan file otomatis.', { duration: 5000 })
-
+    // 3. Simpan file MP3 hasil konversi ke browser
+    const blob = await res.blob()
+    const blobUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = apiUrl
-    a.download = `${youtubeResult.value.title}.mp3`
+    a.href = blobUrl
+    a.download = `${safeTitle}.mp3`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+
+    message.destroyAll()
+    message.success('MP3 berhasil diunduh!')
 
   } catch (err: any) {
     message.destroyAll()
