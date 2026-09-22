@@ -4,7 +4,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { Readable } from 'stream';
@@ -266,13 +266,68 @@ async function handleYoutube(url) {
   // Primary: yt-dlp (best quality metadata)
   try {
     const json = await fetchViaYtdlp(url);
-    const formats = (json.formats || []).filter(f => f.url && (f.ext === 'mp4' || f.vcodec !== 'none'));
-    const bestVideo = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+    const allFormats = json.formats || [];
 
-    // Prefer M4A (AAC) audio over WebM/Opus for broader compatibility
-    const allAudio = (json.formats || []).filter(f => f.acodec !== 'none' && f.vcodec === 'none' && f.url);
-    const m4aAudio = allAudio.filter(f => f.ext === 'm4a').sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
-    const audioOnly = m4aAudio || allAudio.sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
+    // ── Video formats (muxed or video-only with audio available) ──
+    // Collect all unique resolutions from muxed (has video+audio) and video-only streams
+    const muxedFormats = allFormats.filter(f => f.url && f.vcodec !== 'none' && f.acodec !== 'none' && f.height);
+    const videoOnlyFormats = allFormats.filter(f => f.url && f.vcodec !== 'none' && f.acodec === 'none' && f.height);
+
+    // Build deduplicated resolution map: prefer muxed over video-only
+    const resolutionMap = {};
+    // Add video-only first (lower priority)
+    for (const f of videoOnlyFormats) {
+      const key = f.height;
+      if (!resolutionMap[key] || (f.vbr || f.tbr || 0) > (resolutionMap[key].vbr || resolutionMap[key].tbr || 0)) {
+        resolutionMap[key] = f;
+      }
+    }
+    // Override with muxed (higher priority)
+    for (const f of muxedFormats) {
+      const key = f.height;
+      if (!resolutionMap[key] || (f.vbr || f.tbr || 0) > (resolutionMap[key].vbr || resolutionMap[key].tbr || 0)) {
+        resolutionMap[key] = f;
+      }
+    }
+
+    // Sort by resolution descending
+    const videoFormats = Object.values(resolutionMap)
+      .sort((a, b) => (b.height || 0) - (a.height || 0))
+      .map(f => ({
+        quality: f.height ? `${f.height}p` : (f.format_note || 'auto'),
+        height: f.height || 0,
+        url: f.url,
+        ext: f.ext || 'mp4',
+        hasAudio: f.acodec !== 'none',
+        filesize: f.filesize || f.filesize_approx || null,
+        vbr: f.vbr || f.tbr || null,
+        formatId: f.format_id
+      }));
+
+    // ── Audio formats ──
+    const allAudio = allFormats.filter(f => f.acodec !== 'none' && f.vcodec === 'none' && f.url);
+    const seenAudioExt = new Set();
+    const audioFormats = allAudio
+      .sort((a, b) => (b.abr || 0) - (a.abr || 0))
+      .filter(f => {
+        // Keep best of each ext type
+        if (!seenAudioExt.has(f.ext)) { seenAudioExt.add(f.ext); return true; }
+        return false;
+      })
+      .map(f => ({
+        label: f.ext === 'm4a' ? `M4A (AAC)${f.abr ? ` ~${Math.round(f.abr)}kbps` : ''}` :
+               f.ext === 'webm' ? `WebM (Opus)${f.abr ? ` ~${Math.round(f.abr)}kbps` : ''}` :
+               `${(f.ext || 'audio').toUpperCase()}${f.abr ? ` ~${Math.round(f.abr)}kbps` : ''}`,
+        url: f.url,
+        ext: f.ext || 'm4a',
+        abr: f.abr || 0,
+        filesize: f.filesize || f.filesize_approx || null,
+        formatId: f.format_id
+      }));
+
+    // Best single picks for backwards compat
+    const bestVideo = videoFormats[0];
+    const m4aAudio = audioFormats.find(f => f.ext === 'm4a') || audioFormats[0];
 
     return {
       title: json.title || 'YouTube Video',
@@ -280,15 +335,14 @@ async function handleYoutube(url) {
       thumbnail: json.thumbnail || '',
       duration: json.duration || 0,
       videoUrl: bestVideo?.url || json.url || '',
-      audioUrl: audioOnly?.url || '',
-      audioExt: audioOnly?.ext || 'm4a',
+      audioUrl: m4aAudio?.url || '',
+      audioExt: m4aAudio?.ext || 'm4a',
       views: json.view_count,
       likes: json.like_count,
-      formats: formats.slice(0, 5).map(f => ({
-        quality: f.format_note || (f.height ? `${f.height}p` : 'auto'),
-        url: f.url,
-        ext: f.ext
-      }))
+      videoFormats,
+      audioFormats,
+      // Legacy field for history store
+      formats: videoFormats.slice(0, 5).map(f => ({ quality: f.quality, url: f.url, ext: f.ext }))
     };
 
   } catch (ytdlpErr) {
@@ -303,6 +357,8 @@ async function handleYoutube(url) {
         duration: 0,
         videoUrl: cobalt.url,
         audioUrl: '',
+        videoFormats: [{ quality: 'Best', height: 0, url: cobalt.url, ext: 'mp4', hasAudio: true, filesize: null }],
+        audioFormats: [],
       };
     }
     throw new Error('Failed to fetch YouTube video. Please try another link.');
@@ -873,6 +929,85 @@ app.post('/api/settings', async (req, res) => {
   } catch (error) {
     res.status(500).json({ status: false, message: error.message });
   }
+});
+
+// ─── YouTube MP3 Conversion Route ─────────────────────────────────────────
+// Streams yt-dlp MP3 extraction directly to the browser.
+// Requires ffmpeg to be installed (yt-dlp delegates conversion to ffmpeg).
+app.get('/api/youtube/mp3', async (req, res) => {
+  const { url, title } = req.query;
+  if (!url) return res.status(400).json({ status: false, message: 'url is required' });
+  if (!HAS_YTDLP) return res.status(503).json({ status: false, message: 'yt-dlp not available on this server.' });
+
+  const safeTitle = (title ? decodeURIComponent(title) : 'youtube-audio')
+    .replace(/[^\w\s.-]/g, '_').replace(/\s+/g, '_').slice(0, 120);
+  const filename = `${safeTitle}.mp3`;
+  const asciiName = filename.replace(/[^\x20-\x7E]/g, '_');
+  const encodedName = encodeURIComponent(filename);
+
+  console.log(`🎵 MP3 conversion requested: ${decodeURIComponent(url).slice(0, 80)}`);
+
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const args = [
+    '--no-playlist',
+    '--extract-audio',
+    '--audio-format', 'mp3',
+    '--audio-quality', '0',      // best VBR quality
+    '--no-warnings',
+    '-o', '-',                   // pipe to stdout
+    decodeURIComponent(url)
+  ];
+
+  const ytdlpProcess = spawn(YTDLP_PATH, args, { windowsHide: true });
+
+  let headersSent = false;
+  let errorBuffer = '';
+
+  ytdlpProcess.stderr.on('data', (data) => {
+    const text = data.toString();
+    errorBuffer += text;
+    // Detect ffmpeg-not-found early
+    if (text.toLowerCase().includes('ffmpeg') && text.toLowerCase().includes('not found')) {
+      console.error('ffmpeg not found for MP3 conversion');
+      if (!headersSent && !res.headersSent) {
+        res.status(503).json({ status: false, message: 'ffmpeg tidak ditemukan. Install ffmpeg untuk mengaktifkan konversi MP3.' });
+        headersSent = true;
+        ytdlpProcess.kill();
+      }
+    }
+  });
+
+  ytdlpProcess.stdout.on('data', (chunk) => {
+    if (!headersSent) headersSent = true;
+    if (!res.writableEnded) res.write(chunk);
+  });
+
+  ytdlpProcess.on('close', (code) => {
+    if (!res.writableEnded) res.end();
+    if (code !== 0 && !headersSent) {
+      console.error('yt-dlp MP3 failed (code', code, '):', errorBuffer.slice(0, 200));
+    } else {
+      console.log(`✅ MP3 streamed: ${filename}`);
+    }
+  });
+
+  ytdlpProcess.on('error', (err) => {
+    console.error('yt-dlp spawn error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ status: false, message: 'Gagal memulai konversi MP3: ' + err.message });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  // Abort if client disconnects
+  req.on('close', () => {
+    if (!ytdlpProcess.killed) ytdlpProcess.kill();
+  });
 });
 
 // ─── Proxy Download Route ──────────────────────────────────────────────────

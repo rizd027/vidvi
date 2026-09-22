@@ -17,6 +17,11 @@ const currentStep = ref(1)
 const inputUrl = ref('')
 const selectedPlatform = ref<Platform>('')
 const fetchTriggered = ref(false)
+const youtubeDownloadMode = ref<'video' | 'audio'>('video')
+const downloadingMp3 = ref(false)
+
+// Track last URL that was auto-pasted to avoid re-processing on repeated focus
+const lastAutoPastedUrl = ref('')
 
 // Handle prefilled URL from store (e.g. from history page)
 watch(() => appStore.activeTab, async (newTab) => {
@@ -161,6 +166,9 @@ const handleReset = () => {
   fetchTriggered.value = false
   activePhotoIndex.value = null
   isVideoPlaying.value = false
+  youtubeDownloadMode.value = 'video'
+  downloadingMp3.value = false
+  lastAutoPastedUrl.value = ''   // allow re-paste of same URL after reset
 }
 
 const formatDuration = (val: any) => {
@@ -235,6 +243,8 @@ const youtubeResult = computed(() => {
     audioUrl: res.audioUrl || '',
     audioExt: res.audioExt || 'm4a',
     duration: res.duration || 0,
+    videoFormats: (res.videoFormats || []) as Array<{ quality: string; height: number; url: string; ext: string; hasAudio: boolean; filesize: number | null; vbr: number | null }>,
+    audioFormats: (res.audioFormats || []) as Array<{ label: string; url: string; ext: string; abr: number; filesize: number | null }>,
     formats: res.formats || []
   }
 })
@@ -288,7 +298,7 @@ const currentPlatformLabel = computed(() => {
 const pasteFromClipboard = async () => {
   try {
     const text = await navigator.clipboard.readText()
-    if (text) {
+    if (text && text.trim()) {
       inputUrl.value = text.trim()
     } else {
       message.warning('Papan klip kosong.')
@@ -302,67 +312,140 @@ const pasteFromClipboard = async () => {
 const pasteAndDownload = async () => {
   try {
     const text = await navigator.clipboard.readText()
-    if (text) {
-      const url = text.trim()
-      inputUrl.value = url
-      await nextTick()
-      handleSearch()
-    } else {
+    if (!text || !text.trim()) {
       message.warning('Papan klip kosong.')
+      return
     }
+    const url = text.trim()
+    // Validate URL before triggering search
+    const supported = [
+      'spotify.com', 'tiktok.com', 'capcut.com', 'capcut.net',
+      'youtube.com', 'youtu.be', 'instagram.com',
+      'facebook.com', 'fb.watch', 'fb.com', 'twitter.com', 'x.com'
+    ]
+    if (!supported.some(d => url.toLowerCase().includes(d))) {
+      message.warning('Tautan di papan klip tidak didukung.')
+      return
+    }
+    inputUrl.value = url
+    await nextTick()
+    handleSearch()
   } catch (err) {
     message.error('Gagal membaca papan klip. Berikan izin akses papan klip.')
     console.error('Failed to read clipboard:', err)
   }
 }
 
-const checkAutoPaste = async () => {
-  if (!appStore.autoPasteDownload) return
-  if (currentStep.value !== 1) return
-  if (inputUrl.value.trim() !== '') return
+// ── Auto-paste: checks clipboard and auto-triggers download if enabled ──
+// Returns true if it fired a download, false otherwise.
+const checkAutoPaste = async (): Promise<boolean> => {
+  // Guard: feature must be enabled, must be on step 1, input must be empty
+  if (!appStore.autoPasteDownload) return false
+  if (currentStep.value !== 1) return false
+  if (inputUrl.value.trim() !== '') return false
 
   try {
     const text = await navigator.clipboard.readText()
-    if (text) {
-      const url = text.trim()
-      const isSupported = (
-        url.includes('spotify.com') ||
-        url.includes('tiktok.com') ||
-        url.includes('capcut.com') ||
-        url.includes('capcut.net') ||
-        url.includes('youtube.com') ||
-        url.includes('youtu.be') ||
-        url.includes('instagram.com') ||
-        url.includes('facebook.com') ||
-        url.includes('fb.watch') ||
-        url.includes('fb.com') ||
-        url.includes('twitter.com') ||
-        url.includes('x.com')
-      )
-      if (isSupported) {
-        inputUrl.value = url
-        message.info(t('autoPasted'))
-        await nextTick()
-        handleSearch()
-      }
+    if (!text) return false
+    const url = text.trim()
+    if (!url) return false
+
+    // Skip if we already processed this exact URL this session
+    if (url === lastAutoPastedUrl.value) return false
+
+    const supported = [
+      'spotify.com', 'tiktok.com', 'capcut.com', 'capcut.net',
+      'youtube.com', 'youtu.be', 'instagram.com',
+      'facebook.com', 'fb.watch', 'fb.com', 'twitter.com', 'x.com'
+    ]
+    const isSupported = supported.some(d => url.toLowerCase().includes(d))
+
+    if (isSupported) {
+      lastAutoPastedUrl.value = url
+      inputUrl.value = url
+      message.info(t('autoPasted'))
+      await nextTick()
+      handleSearch()
+      return true
     }
   } catch (error) {
+    // Clipboard access denied — silently ignore
     console.warn('Auto paste failed:', error)
+  }
+  return false
+}
+
+// Re-run auto-paste when the feature is toggled ON (fixes race condition
+// where settings load finishes AFTER onMounted)
+watch(() => appStore.autoPasteDownload, (enabled) => {
+  if (enabled && currentStep.value === 1 && inputUrl.value.trim() === '') {
+    checkAutoPaste()
+  }
+})
+
+// ── Visibility & Focus listeners ──
+// visibilitychange fires reliably on tab-switch and PWA resume.
+// pageshow covers back-navigation and bfcache restore.
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    checkAutoPaste()
   }
 }
 
+const handlePageShow = (e: PageTransitionEvent) => {
+  if (e.persisted) checkAutoPaste()   // bfcache restore
+}
+
 onMounted(() => {
-  checkAutoPaste()
+  // Small delay to let App.vue finish loading settings from server.
+  // initializeApp() is async; appStore.autoPasteDownload may still be false
+  // by the time onMounted runs synchronously.
+  setTimeout(() => checkAutoPaste(), 400)
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('pageshow', handlePageShow)
   window.addEventListener('focus', checkAutoPaste)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('pageshow', handlePageShow)
   window.removeEventListener('focus', checkAutoPaste)
 })
 
-// ── Proxy Download Helper ──
-// Routes download through /api/proxy-download so the browser saves the file
-// directly instead of opening a new tab.
+// ── YouTube MP3 Download ──
+async function downloadMp3() {
+  if (!youtubeResult.value || downloadingMp3.value) return
+  const ytUrl = inputUrl.value.trim()
+  if (!ytUrl) return
+  downloadingMp3.value = true
+  message.loading('Mengkonversi ke MP3... (mungkin butuh waktu)', { duration: 0 })
+  try {
+    const apiUrl = `/api/youtube/mp3?url=${encodeURIComponent(ytUrl)}&title=${encodeURIComponent(youtubeResult.value.title)}`
+    const response = await fetch(apiUrl)
+    if (!response.ok) {
+      let errMsg = 'Gagal mengkonversi MP3.'
+      try { const j = await response.json(); errMsg = j.message || errMsg } catch {}
+      throw new Error(errMsg)
+    }
+    const blob = await response.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${youtubeResult.value.title}.mp3`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
+    message.destroyAll()
+    message.success('MP3 berhasil diunduh!')
+  } catch (err: any) {
+    message.destroyAll()
+    message.error(err.message || 'Gagal mengkonversi MP3.')
+  } finally {
+    downloadingMp3.value = false
+  }
+}
+
 function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
   if (!rawUrl) return
   const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(rawUrl)}&filename=${encodeURIComponent(filename)}`
@@ -657,8 +740,7 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
           </div>
         </div>
 
-        <!-- YouTube Result — no embedded video preview because signed URLs expire quickly.
-             User can click thumbnail to visit YouTube, or download directly. -->
+        <!-- YouTube Result -->
         <div v-if="selectedPlatform === 'youtube' && youtubeResult" class="media-details">
           <div class="cover-wrapper wide" v-if="youtubeResult.thumbnail">
             <img :src="youtubeResult.thumbnail" alt="Thumbnail" class="media-cover" referrerpolicy="no-referrer" />
@@ -669,17 +751,103 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
             <p v-if="youtubeResult.duration" class="meta-row">{{ t('duration') }}: {{ formatDuration(youtubeResult.duration) }}</p>
           </div>
           <div class="download-actions">
-            <button v-if="youtubeResult.videoUrl" class="btn-download" @click="proxyDownload(youtubeResult.videoUrl, youtubeResult.title + '.mp4')">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              {{ t('downloadVideo') }}
-            </button>
-            <button v-if="youtubeResult.audioUrl" class="btn-download secondary" @click="proxyDownload(youtubeResult.audioUrl, youtubeResult.title + '.' + youtubeResult.audioExt)">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-              {{ t('audioOnly') }}
-            </button>
+            <!-- Tab Switcher -->
+            <div class="yt-tab-switcher">
+              <button
+                class="yt-tab-btn"
+                :class="{ active: youtubeDownloadMode === 'video' }"
+                @click="youtubeDownloadMode = 'video'"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                Video
+              </button>
+              <button
+                class="yt-tab-btn"
+                :class="{ active: youtubeDownloadMode === 'audio' }"
+                @click="youtubeDownloadMode = 'audio'"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                Audio
+              </button>
+            </div>
+
+            <!-- VIDEO TAB -->
+            <div v-if="youtubeDownloadMode === 'video'" class="yt-panel">
+              <template v-if="youtubeResult.videoFormats && youtubeResult.videoFormats.length > 0">
+                <p class="yt-panel-label">Pilih Resolusi</p>
+                <div class="yt-resolution-grid">
+                  <button
+                    v-for="fmt in youtubeResult.videoFormats"
+                    :key="fmt.quality"
+                    class="yt-res-btn"
+                    :class="{ 'has-no-audio': !fmt.hasAudio }"
+                    @click="proxyDownload(fmt.url, youtubeResult!.title + '.' + fmt.ext)"
+                    :title="fmt.hasAudio ? `Download ${fmt.quality}` : `${fmt.quality} (video only — tanpa audio)`"
+                  >
+                    <span class="yt-res-quality">{{ fmt.quality }}</span>
+                    <span v-if="!fmt.hasAudio" class="yt-res-tag">no audio</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="yt-res-dl-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  </button>
+                </div>
+                <p class="yt-panel-hint">Format "no audio" adalah stream video-only dari YouTube. Gunakan tab Audio untuk mengunduh audio terpisah.</p>
+              </template>
+              <template v-else-if="youtubeResult.videoUrl">
+                <button class="btn-download" @click="proxyDownload(youtubeResult.videoUrl, youtubeResult.title + '.mp4')">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  {{ t('downloadVideo') }}
+                </button>
+              </template>
+            </div>
+
+            <!-- AUDIO TAB -->
+            <div v-else-if="youtubeDownloadMode === 'audio'" class="yt-panel">
+              <p class="yt-panel-label">Format Audio</p>
+
+              <!-- Available audio formats from yt-dlp -->
+              <template v-if="youtubeResult.audioFormats && youtubeResult.audioFormats.length > 0">
+                <button
+                  v-for="af in youtubeResult.audioFormats"
+                  :key="af.ext"
+                  class="btn-download secondary yt-audio-btn"
+                  @click="proxyDownload(af.url, youtubeResult!.title + '.' + af.ext)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                  {{ af.label }}
+                  <span v-if="af.filesize" class="yt-audio-size">{{ Math.round(af.filesize / 1024 / 1024) }}MB</span>
+                </button>
+              </template>
+              <template v-else-if="youtubeResult.audioUrl">
+                <button class="btn-download secondary" @click="proxyDownload(youtubeResult.audioUrl, youtubeResult.title + '.' + youtubeResult.audioExt)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                  {{ t('audioOnly') }}
+                </button>
+              </template>
+
+              <!-- MP3 Conversion -->
+              <div class="yt-mp3-divider">
+                <span>atau konversi ke</span>
+              </div>
+              <button
+                class="btn-download yt-mp3-btn"
+                :class="{ loading: downloadingMp3 }"
+                :disabled="downloadingMp3"
+                @click="downloadMp3"
+              >
+                <template v-if="!downloadingMp3">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
+                  Download MP3
+                </template>
+                <template v-else>
+                  <span class="yt-mp3-spinner"></span>
+                  Mengkonversi...
+                </template>
+              </button>
+              <p class="yt-panel-hint">Konversi MP3 membutuhkan ffmpeg di server. Kualitas VBR terbaik (0).</p>
+            </div>
+
             <div class="reset-wrapper text-center">
               <button class="btn-secondary" @click="handleReset">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="button-icon"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
                 {{ t('downloadAnother') }}
               </button>
             </div>
@@ -1493,6 +1661,236 @@ function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
   color: var(--bg-primary) !important;
   transform: translate(-50%, -50%) scale(1.1) !important;
   box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.4) !important;
+}
+
+/* ── YouTube Format Selector ── */
+.yt-tab-switcher {
+  display: flex;
+  gap: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--bg-tertiary);
+  margin-bottom: 4px;
+}
+
+.yt-tab-btn {
+  flex: 1;
+  min-height: 42px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  border-radius: 10px;
+  margin: 3px;
+}
+
+.yt-tab-btn.active {
+  background: var(--accent-color);
+  color: var(--bg-primary);
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+}
+
+.yt-tab-btn:not(.active):hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.yt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideUp 0.2s ease;
+}
+
+.yt-panel-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+
+.yt-panel-hint {
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+.yt-resolution-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.yt-res-btn {
+  position: relative;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1.5px solid var(--bg-tertiary);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.yt-res-btn::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  background: rgba(var(--accent-rgb), 0);
+  border-radius: 50% 0 12px 0;
+  transition: background 0.2s ease;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.yt-res-btn:hover {
+  border-color: var(--accent-color);
+  background: rgba(var(--accent-rgb), 0.06);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.12);
+}
+
+.yt-res-btn:hover::after {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.yt-res-btn:active {
+  transform: scale(0.97);
+}
+
+.yt-res-btn.has-no-audio {
+  border-color: color-mix(in srgb, var(--text-tertiary) 25%, transparent);
+  opacity: 0.7;
+}
+
+.yt-res-btn.has-no-audio:hover {
+  border-color: var(--text-secondary);
+  opacity: 0.9;
+}
+
+.yt-res-quality {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.yt-res-tag {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.yt-res-dl-icon {
+  position: absolute;
+  bottom: 7px;
+  right: 9px;
+  opacity: 0;
+  color: var(--accent-color);
+  transition: opacity 0.2s ease;
+}
+
+.yt-res-btn:hover .yt-res-dl-icon {
+  opacity: 1;
+}
+
+.yt-audio-btn {
+  justify-content: flex-start !important;
+  position: relative;
+}
+
+.yt-audio-size {
+  position: absolute;
+  right: 14px;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.yt-mp3-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin: 4px 0;
+}
+
+.yt-mp3-divider::before,
+.yt-mp3-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--bg-tertiary);
+}
+
+.yt-mp3-btn {
+  background: linear-gradient(135deg, #1db954 0%, #1ed760 100%) !important;
+  color: #fff !important;
+  border: none !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.yt-mp3-btn::before {
+  content: 'MP3';
+  position: absolute;
+  right: 14px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+}
+
+.yt-mp3-btn:hover {
+  background: linear-gradient(135deg, #1ed760 0%, #22e862 100%) !important;
+  box-shadow: 0 4px 16px rgba(30, 215, 96, 0.35) !important;
+}
+
+.yt-mp3-btn.loading {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.yt-mp3-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s ease-in-out infinite;
+  flex-shrink: 0;
 }
 </style>
 
