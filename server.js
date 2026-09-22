@@ -3,10 +3,11 @@ import cors from 'cors';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
-import { existsSync } from 'fs';
+import { existsSync, createReadStream, unlink, statSync } from 'fs';
 import { Readable } from 'stream';
 
 const execFileAsync = promisify(execFile);
@@ -932,83 +933,134 @@ app.post('/api/settings', async (req, res) => {
 });
 
 // ─── YouTube MP3 Conversion Route ─────────────────────────────────────────
-// Streams yt-dlp MP3 extraction directly to the browser.
-// Requires ffmpeg to be installed (yt-dlp delegates conversion to ffmpeg).
+// Uses a temp file strategy: yt-dlp writes the converted MP3 to a temp file,
+// then the server streams the file to the browser and deletes it on finish.
+// This is more reliable than -o - (piping to stdout) because ffmpeg postprocessors
+// require a real file path — piping is not supported for format conversion.
 app.get('/api/youtube/mp3', async (req, res) => {
   const { url, title } = req.query;
   if (!url) return res.status(400).json({ status: false, message: 'url is required' });
-  if (!HAS_YTDLP) return res.status(503).json({ status: false, message: 'yt-dlp not available on this server.' });
+  if (!HAS_YTDLP) return res.status(503).json({ status: false, message: 'yt-dlp tidak tersedia di server ini.' });
 
+  const decodedUrl = decodeURIComponent(url);
   const safeTitle = (title ? decodeURIComponent(title) : 'youtube-audio')
     .replace(/[^\w\s.-]/g, '_').replace(/\s+/g, '_').slice(0, 120);
   const filename = `${safeTitle}.mp3`;
   const asciiName = filename.replace(/[^\x20-\x7E]/g, '_');
   const encodedName = encodeURIComponent(filename);
 
-  console.log(`🎵 MP3 conversion requested: ${decodeURIComponent(url).slice(0, 80)}`);
+  // Temp file path — yt-dlp writes here, we stream it, then delete it
+  const tmpId = `vidvi_mp3_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const tmpBase = path.join(os.tmpdir(), tmpId);
+  // yt-dlp will append .mp3 itself, so pass base path without extension
+  const tmpFile = `${tmpBase}.mp3`;
 
-  res.setHeader('Content-Type', 'audio/mpeg');
-  res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Transfer-Encoding', 'chunked');
+  console.log(`🎵 MP3 conversion started: ${decodedUrl.slice(0, 80)}`);
 
   const args = [
     '--no-playlist',
     '--extract-audio',
     '--audio-format', 'mp3',
-    '--audio-quality', '0',      // best VBR quality
+    '--audio-quality', '0',
     '--no-warnings',
-    '-o', '-',                   // pipe to stdout
-    decodeURIComponent(url)
+    '-o', tmpBase + '.%(ext)s',    // write to temp file (not stdout)
+    decodedUrl
   ];
+
+  let errorBuffer = '';
 
   const ytdlpProcess = spawn(YTDLP_PATH, args, { windowsHide: true });
 
-  let headersSent = false;
-  let errorBuffer = '';
-
-  ytdlpProcess.stderr.on('data', (data) => {
-    const text = data.toString();
-    errorBuffer += text;
-    // Detect ffmpeg-not-found early
-    if (text.toLowerCase().includes('ffmpeg') && text.toLowerCase().includes('not found')) {
-      console.error('ffmpeg not found for MP3 conversion');
-      if (!headersSent && !res.headersSent) {
-        res.status(503).json({ status: false, message: 'ffmpeg tidak ditemukan. Install ffmpeg untuk mengaktifkan konversi MP3.' });
-        headersSent = true;
-        ytdlpProcess.kill();
-      }
-    }
-  });
-
-  ytdlpProcess.stdout.on('data', (chunk) => {
-    if (!headersSent) headersSent = true;
-    if (!res.writableEnded) res.write(chunk);
-  });
-
-  ytdlpProcess.on('close', (code) => {
-    if (!res.writableEnded) res.end();
-    if (code !== 0 && !headersSent) {
-      console.error('yt-dlp MP3 failed (code', code, '):', errorBuffer.slice(0, 200));
-    } else {
-      console.log(`✅ MP3 streamed: ${filename}`);
-    }
-  });
+  ytdlpProcess.stderr.on('data', (data) => { errorBuffer += data.toString(); });
+  ytdlpProcess.stdout.on('data', () => {});   // drain stdout to prevent blocking
 
   ytdlpProcess.on('error', (err) => {
     console.error('yt-dlp spawn error:', err.message);
     if (!res.headersSent) {
       res.status(500).json({ status: false, message: 'Gagal memulai konversi MP3: ' + err.message });
-    } else if (!res.writableEnded) {
-      res.end();
     }
   });
 
-  // Abort if client disconnects
+  ytdlpProcess.on('close', (code) => {
+    if (code !== 0) {
+      console.error(`yt-dlp MP3 failed (code ${code}):`, errorBuffer.slice(0, 300));
+
+      // Give user a friendly error message
+      let userMsg = 'Konversi MP3 gagal.';
+      const errLower = errorBuffer.toLowerCase();
+      if (errLower.includes('ffmpeg') && errLower.includes('not found')) {
+        userMsg = 'ffmpeg tidak ditemukan di server. Install ffmpeg untuk mengaktifkan konversi MP3.';
+      } else if (errLower.includes('403') || errLower.includes('forbidden')) {
+        userMsg = 'YouTube memblokir permintaan ini. Coba lagi nanti atau gunakan unduhan audio langsung.';
+      } else if (errLower.includes('sign in') || errLower.includes('age')) {
+        userMsg = 'Video membutuhkan login atau verifikasi umur dan tidak bisa diunduh.';
+      } else if (errLower.includes('private')) {
+        userMsg = 'Video ini bersifat privat dan tidak dapat diunduh.';
+      }
+
+      if (!res.headersSent) {
+        return res.status(422).json({ status: false, message: userMsg });
+      }
+      return;
+    }
+
+    // Verify the output file exists and is not empty
+    let fileSize = 0;
+    try {
+      fileSize = statSync(tmpFile).size;
+    } catch {
+      if (!res.headersSent) {
+        return res.status(500).json({ status: false, message: 'File MP3 tidak ditemukan setelah konversi. Pastikan ffmpeg terinstall.' });
+      }
+      return;
+    }
+
+    if (fileSize === 0) {
+      unlink(tmpFile, () => {});
+      if (!res.headersSent) {
+        return res.status(500).json({ status: false, message: 'File MP3 kosong. Konversi gagal.' });
+      }
+      return;
+    }
+
+    console.log(`✅ MP3 ready (${Math.round(fileSize / 1024)}KB), streaming: ${filename}`);
+
+    // Stream the converted file to the browser
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
+    res.setHeader('Content-Length', fileSize);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    const fileStream = createReadStream(tmpFile);
+
+    fileStream.on('error', (err) => {
+      console.error('File stream error:', err.message);
+      if (!res.writableEnded) res.end();
+    });
+
+    fileStream.on('close', () => {
+      // Delete temp file after streaming completes
+      unlink(tmpFile, (err) => {
+        if (err) console.warn('Failed to delete temp MP3:', err.message);
+      });
+    });
+
+    // Abort stream if client disconnects early
+    req.on('close', () => fileStream.destroy());
+
+    fileStream.pipe(res);
+  });
+
+  // Kill yt-dlp if client disconnects during conversion
   req.on('close', () => {
-    if (!ytdlpProcess.killed) ytdlpProcess.kill();
+    if (!ytdlpProcess.killed) {
+      ytdlpProcess.kill();
+      // Cleanup temp file if it exists
+      try { unlink(tmpFile, () => {}); } catch {}
+    }
   });
 });
+
 
 // ─── Proxy Download Route ──────────────────────────────────────────────────
 // Streams a remote URL through the server so the browser triggers a real

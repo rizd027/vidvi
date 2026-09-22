@@ -414,33 +414,56 @@ onUnmounted(() => {
 })
 
 // ── YouTube MP3 Download ──
+// Uses direct href navigation so the browser handles streaming natively.
+// The old fetch+blob approach buffered the entire file into RAM, causing
+// timeouts and out-of-memory errors on long videos.
 async function downloadMp3() {
   if (!youtubeResult.value || downloadingMp3.value) return
   const ytUrl = inputUrl.value.trim()
   if (!ytUrl) return
+
   downloadingMp3.value = true
-  message.loading('Mengkonversi ke MP3... (mungkin butuh waktu)', { duration: 0 })
+  message.loading('Memulai konversi MP3... Mohon tunggu', { duration: 4000 })
+
   try {
     const apiUrl = `/api/youtube/mp3?url=${encodeURIComponent(ytUrl)}&title=${encodeURIComponent(youtubeResult.value.title)}`
-    const response = await fetch(apiUrl)
-    if (!response.ok) {
-      let errMsg = 'Gagal mengkonversi MP3.'
-      try { const j = await response.json(); errMsg = j.message || errMsg } catch {}
+
+    // First do a HEAD-like check: ping the endpoint to see if it's reachable
+    // and yt-dlp + ffmpeg are available, before triggering the browser download.
+    // We use a short fetch to /api/youtube/mp3 with a signal timeout.
+    // If the server returns a JSON error (non-ok), show it. Otherwise trigger download.
+    const checkRes = await fetch(apiUrl, {
+      headers: { 'Accept': 'application/json, audio/mpeg, */*' },
+      signal: AbortSignal.timeout(8000)
+    }).catch(() => null)
+
+    // If server returned a JSON error before starting the stream
+    if (checkRes && !checkRes.ok) {
+      let errMsg = 'Konversi MP3 gagal.'
+      const ct = checkRes.headers.get('content-type') || ''
+      if (ct.includes('application/json')) {
+        try { const j = await checkRes.json(); errMsg = j.message || errMsg } catch {}
+      }
       throw new Error(errMsg)
     }
-    const blob = await response.blob()
+
+    // Server is processing — trigger the actual browser download via anchor
+    message.destroyAll()
+    message.info('Sedang mengunduh MP3... Browser akan menyimpan file otomatis.', { duration: 5000 })
+
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
+    a.href = apiUrl
     a.download = `${youtubeResult.value.title}.mp3`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(a.href)
-    message.destroyAll()
-    message.success('MP3 berhasil diunduh!')
+
   } catch (err: any) {
     message.destroyAll()
-    message.error(err.message || 'Gagal mengkonversi MP3.')
+    const msg = err?.name === 'TimeoutError'
+      ? 'Server tidak merespons. Pastikan server berjalan dan coba lagi.'
+      : (err.message || 'Gagal mengkonversi MP3.')
+    message.error(msg, { duration: 5000 })
   } finally {
     downloadingMp3.value = false
   }
