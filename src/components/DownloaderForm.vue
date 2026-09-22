@@ -427,7 +427,10 @@ async function downloadMp3() {
     if (statusRes && statusRes.ok) {
       const statusData = await statusRes.json().catch(() => null)
       if (statusData && !statusData.hasFfmpeg) {
-        message.warning('FFmpeg belum aktif di server. Silakan gunakan pilihan format audio langsung (M4A/WebM) di atas.', { duration: 6000 })
+        const hint = statusData.isServerless
+          ? 'Konversi MP3 server-side membutuhkan FFmpeg di server lokal. Silakan gunakan format audio langsung atau jalankan Vidvi secara lokal.'
+          : 'FFmpeg belum aktif di server. Silakan gunakan pilihan format audio langsung (M4A/WebM) di atas.'
+        message.warning(hint, { duration: 6500 })
         downloadingMp3.value = false
         return
       }

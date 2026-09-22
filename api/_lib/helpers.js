@@ -155,13 +155,30 @@ export async function fetchViaCobalt(url, mode = 'auto') {
 export async function handleYoutube(url) {
   const cobalt = await fetchViaCobalt(url, 'auto');
   if (cobalt) {
+    let audioUrl = '';
+    let audioFormats = [];
+    try {
+      const audioCobalt = await fetchViaCobalt(url, 'audio');
+      if (audioCobalt?.url) {
+        audioUrl = audioCobalt.url;
+        audioFormats = [
+          { label: 'Audio (MP3)', url: audioCobalt.url, ext: 'mp3', abr: 128 }
+        ];
+      }
+    } catch {}
+
     return {
       title: 'YouTube Video',
       author: 'YouTube',
       thumbnail: `https://img.youtube.com/vi/${extractYoutubeId(url)}/hqdefault.jpg`,
       duration: 0,
       videoUrl: cobalt.url,
-      audioUrl: '',
+      audioUrl,
+      audioExt: 'mp3',
+      audioFormats,
+      videoFormats: [
+        { quality: 'Best', height: 0, url: cobalt.url, ext: 'mp4', hasAudio: true, filesize: null }
+      ]
     };
   }
   throw new Error('Gagal mengambil video YouTube. Coba tautan lain atau gunakan format yang berbeda.');
