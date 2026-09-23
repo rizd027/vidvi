@@ -1,4 +1,4 @@
-import handler from './[platform].js';
+import handler from './_downloadHandler.js';
 
 export default async function (req, res) {
   req.query = req.query || {};
