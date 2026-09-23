@@ -53,8 +53,10 @@ export default async function handler(req, res) {
     // ── Spotify ──
     if (platform === 'spotify') {
       const response = await fetch(`https://bintangapi.my.id/api/downloader/spotify?url=${encodeURIComponent(resolvedUrl)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(10000)
       });
+      if (!response.ok) throw new Error(t.fetchFailed);
       const data = await response.json();
       if (!data.success && !data.data) throw new Error(data.error || t.fetchFailed);
       const bData = data.data;
@@ -71,8 +73,10 @@ export default async function handler(req, res) {
     // ── CapCut ──
     else if (platform === 'capcut') {
       const response = await fetch(`https://bintangapi.my.id/api/downloader/capcut?url=${encodeURIComponent(resolvedUrl)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(10000)
       });
+      if (!response.ok) throw new Error(t.fetchFailed);
       const data = await response.json();
       if (!data.success && !data.data) throw new Error(data.error || t.fetchFailed);
       const bData = data.data;

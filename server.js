@@ -31,7 +31,6 @@ const HAS_YTDLP = existsSync(YTDLP_PATH);
 
 // Working Cobalt instances (tested & verified)
 const COBALT_INSTANCES = [
-  'https://kitty.tame.gg',
   'https://api.cobalt.liubquanti.click',
 ];
 

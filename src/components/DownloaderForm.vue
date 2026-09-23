@@ -78,7 +78,19 @@ const fetchMedia = async () => {
     `/api/download/${plat}?url=${encodeURIComponent(cleanUrl)}&lang=${locale.value}`
   )
   let data
-  try { data = await response.json() } catch (e) { throw new Error(t('errorFetch')) }
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    try {
+      data = await response.json()
+    } catch {
+      throw new Error(t('errorFetch'))
+    }
+  } else {
+    if (response.status === 504 || response.status === 408) {
+      throw new Error(locale.value === 'id' ? 'Koneksi ke server media batas waktu (timeout). Silakan coba lagi.' : 'Media server connection timed out. Please try again.')
+    }
+    throw new Error(t('errorFetch'))
+  }
   if (!response.ok || data.status === false) throw new Error(data.message || t('errorFetch'))
   return data.result || data
 }
@@ -309,14 +321,19 @@ const currentPlatformLabel = computed(() => {
 })
 
 // ── Proxy Download Helper ──
-// Routes download through /api/proxy-download so the browser saves the file
-// directly instead of opening a new tab.
 function proxyDownload(rawUrl: string, filename = 'vidvi-download') {
   if (!rawUrl) return
-  const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(rawUrl)}&filename=${encodeURIComponent(filename)}`
+  // Cobalt tunnel URLs already send Content-Disposition: attachment with proper filename
+  // Downloading directly avoids serverless proxy bandwidth and 30s timeout limitations
+  const isDirectAttachment = rawUrl.includes('/tunnel/')
+  const targetUrl = isDirectAttachment
+    ? rawUrl
+    : `/api/proxy-download?url=${encodeURIComponent(rawUrl)}&filename=${encodeURIComponent(filename)}`
   const a = document.createElement('a')
-  a.href = proxyUrl
+  a.href = targetUrl
   a.download = filename
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

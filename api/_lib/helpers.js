@@ -122,7 +122,6 @@ export function validateUrl(platform, url, lang = 'id') {
 
 // ─── Working Cobalt Instances ──────────────────────────────────────────────
 const COBALT_INSTANCES = [
-  'https://kitty.tame.gg',
   'https://api.cobalt.liubquanti.click',
 ];
 
@@ -155,41 +154,25 @@ export async function fetchViaCobalt(url, mode = 'auto') {
 
 // ─── YouTube Handler ───────────────────────────────────────────────────────
 export async function handleYoutube(url) {
-  // Method 1: BTCH / backend1 API (fast & returns both mp4 and mp3)
-  try {
-    const res = await fetch(`https://backend1.tioo.eu.org/youtube?url=${encodeURIComponent(url)}`, {
-      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
-      signal: AbortSignal.timeout(15000)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.status && (data.mp4 || data.mp3)) {
-        const videoFormats = [];
-        if (data.mp4) {
-          videoFormats.push({ quality: 'HD / 720p', height: 720, url: data.mp4, ext: 'mp4', hasAudio: true, filesize: null });
-        }
-        const audioFormats = [];
-        if (data.mp3) {
-          audioFormats.push({ label: 'Audio MP3', url: data.mp3, ext: 'mp3', abr: 128, filesize: null });
-        }
-        return {
-          title: data.title || 'YouTube Video',
-          author: data.author || 'YouTube',
-          thumbnail: data.thumbnail || `https://img.youtube.com/vi/${extractYoutubeId(url)}/hqdefault.jpg`,
-          duration: 0,
-          videoUrl: data.mp4 || '',
-          audioUrl: data.mp3 || '',
-          audioExt: 'mp3',
-          videoFormats,
-          audioFormats
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('BTCH YouTube failed:', err.message);
-  }
+  const videoId = extractYoutubeId(url);
+  let title = 'YouTube Video';
+  let author = 'YouTube';
+  let thumbnail = videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : '';
 
-  // Method 2: Cobalt fallback
+  // 1. Fetch metadata via YouTube oEmbed (fast ~200ms)
+  try {
+    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    if (oembedRes.ok) {
+      const oembed = await oembedRes.json();
+      if (oembed.title) title = oembed.title;
+      if (oembed.author_name) author = oembed.author_name;
+      if (oembed.thumbnail_url) thumbnail = oembed.thumbnail_url;
+    }
+  } catch {}
+
+  // 2. Primary: Cobalt API (fast, reliable)
   const cobalt = await fetchViaCobalt(url, 'auto');
   if (cobalt) {
     let audioUrl = '';
@@ -205,18 +188,52 @@ export async function handleYoutube(url) {
     } catch {}
 
     return {
-      title: 'YouTube Video',
-      author: 'YouTube',
-      thumbnail: `https://img.youtube.com/vi/${extractYoutubeId(url)}/hqdefault.jpg`,
+      title,
+      author,
+      thumbnail,
       duration: 0,
       videoUrl: cobalt.url,
       audioUrl,
       audioExt: 'mp3',
       audioFormats,
       videoFormats: [
-        { quality: 'Best', height: 0, url: cobalt.url, ext: 'mp4', hasAudio: true, filesize: null }
+        { quality: 'Best / HD', height: 1080, url: cobalt.url, ext: 'mp4', hasAudio: true, filesize: null }
       ]
     };
+  }
+
+  // 3. Fallback: BTCH / backend1 API (short 4s timeout)
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/youtube?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status && (data.mp4 || data.mp3)) {
+        const videoFormats = [];
+        if (data.mp4) {
+          videoFormats.push({ quality: 'HD / 720p', height: 720, url: data.mp4, ext: 'mp4', hasAudio: true, filesize: null });
+        }
+        const audioFormats = [];
+        if (data.mp3) {
+          audioFormats.push({ label: 'Audio MP3', url: data.mp3, ext: 'mp3', abr: 128, filesize: null });
+        }
+        return {
+          title: data.title || title,
+          author: data.author || author,
+          thumbnail: data.thumbnail || thumbnail,
+          duration: 0,
+          videoUrl: data.mp4 || '',
+          audioUrl: data.mp3 || '',
+          audioExt: 'mp3',
+          videoFormats,
+          audioFormats
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH YouTube failed:', err.message);
   }
 
   throw new Error('Gagal mengambil video YouTube. Coba tautan lain atau gunakan format yang berbeda.');
@@ -280,11 +297,24 @@ export async function handleInstagram(url) {
     console.warn('FastDL Instagram failed:', err.message);
   }
 
-  // Method 2: BTCH / backend1 API
+  // Method 2: Cobalt fallback (fast)
+  const cobalt = await fetchViaCobalt(url);
+  if (cobalt) {
+    return {
+      title: 'Instagram Video',
+      author: 'Instagram',
+      thumbnail: '',
+      duration: 0,
+      videoUrl: cobalt.url,
+      picker: cobalt.picker || null,
+    };
+  }
+
+  // Method 3: BTCH / backend1 API (short 4s timeout)
   try {
     const res = await fetch(`https://backend1.tioo.eu.org/igdl?url=${encodeURIComponent(url)}`, {
       headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(4000)
     });
     if (res.ok) {
       const data = await res.json();
@@ -305,29 +335,56 @@ export async function handleInstagram(url) {
     console.warn('BTCH Instagram failed:', err.message);
   }
 
-  // Method 3: Cobalt fallback
-  const cobalt = await fetchViaCobalt(url);
-  if (cobalt) {
-    return {
-      title: 'Instagram Video',
-      author: 'Instagram',
-      thumbnail: '',
-      duration: 0,
-      videoUrl: cobalt.url,
-      picker: cobalt.picker || null,
-    };
-  }
-
   throw new Error('Gagal mengambil video Instagram. Pastikan akun tidak privat dan tautan valid.');
 }
 
 // ─── Facebook Handler ──────────────────────────────────────────────────────
 export async function handleFacebook(url) {
-  // Method 1: BTCH / backend1 API
+  // Method 1: fdown scraper
+  try {
+    const res = await fetch('https://fdown.net/download.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': 'https://fdown.net/',
+        'Origin': 'https://fdown.net',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml'
+      },
+      body: new URLSearchParams({ URLz: url }),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const hdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>HD/i);
+      const sdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>SD/i);
+      const anyMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]+\.mp4[^"]*)"/i);
+      const videoUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
+      if (videoUrl) {
+        return { videoUrl, title: 'Facebook Video', author: 'Facebook', thumbnail: '', duration: 0 };
+      }
+    }
+  } catch (err) {
+    console.warn('fdown failed:', err.message);
+  }
+
+  // Method 2: Cobalt fallback
+  const cobalt = await fetchViaCobalt(url);
+  if (cobalt) {
+    return {
+      title: 'Facebook Video',
+      author: 'Facebook',
+      thumbnail: '',
+      duration: 0,
+      videoUrl: cobalt.url,
+    };
+  }
+
+  // Method 3: BTCH / backend1 API (short 4s timeout)
   try {
     const res = await fetch(`https://backend1.tioo.eu.org/fbdown?url=${encodeURIComponent(url)}`, {
       headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(4000)
     });
     if (res.ok) {
       const data = await res.json();
@@ -358,82 +415,18 @@ export async function handleFacebook(url) {
     console.warn('BTCH Facebook failed:', err.message);
   }
 
-  // Method 2: fdown scraper
-  try {
-    const res = await fetch('https://fdown.net/download.php', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': 'https://fdown.net/',
-        'Origin': 'https://fdown.net',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml'
-      },
-      body: new URLSearchParams({ URLz: url }),
-      signal: AbortSignal.timeout(10000)
-    });
-    if (res.ok) {
-      const text = await res.text();
-      const hdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>HD/i);
-      const sdMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]*)"\s[^>]*>SD/i);
-      const anyMatch = text.match(/href="(https?:\/\/[^"]*fbcdn[^"]+\.mp4[^"]*)"/i);
-      const videoUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
-      if (videoUrl) {
-        return { videoUrl, title: 'Facebook Video', author: 'Facebook', thumbnail: '', duration: 0 };
-      }
-    }
-  } catch (err) {
-    console.warn('fdown failed:', err.message);
-  }
-
-  // Method 3: Cobalt fallback
-  const cobalt = await fetchViaCobalt(url);
-  if (cobalt) {
-    return {
-      title: 'Facebook Video',
-      author: 'Facebook',
-      thumbnail: '',
-      duration: 0,
-      videoUrl: cobalt.url,
-    };
-  }
-
   throw new Error('Gagal mengambil video Facebook. Pastikan video bersifat publik.');
 }
 
 // ─── Twitter Handler ───────────────────────────────────────────────────────
 export async function handleTwitter(url) {
-  // Method 1: BTCH / backend1 API
-  try {
-    const res = await fetch(`https://backend1.tioo.eu.org/twitter?url=${encodeURIComponent(url)}`, {
-      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
-      signal: AbortSignal.timeout(15000)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const urls = Array.isArray(data.url) ? data.url : [];
-      const bestUrl = urls[0]?.hd || urls[0]?.sd || urls[1]?.hd || urls[1]?.sd || (typeof data.url === 'string' ? data.url : '');
-      if (bestUrl) {
-        return {
-          title: data.title || 'Twitter/X Video',
-          author: 'Twitter User',
-          thumbnail: '',
-          duration: 0,
-          videoUrl: bestUrl
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('BTCH Twitter failed:', err.message);
-  }
-
-  // Method 2: fxtwitter embed API
+  // Method 1: fxtwitter embed API (fast, high reliability)
   const tweetId = url.match(/status\/(\d+)/)?.[1];
   if (tweetId) {
     try {
       const res = await fetch(`https://api.fxtwitter.com/status/${tweetId}`, {
         headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(6000)
       });
       if (res.ok) {
         const json = await res.json();
@@ -453,7 +446,7 @@ export async function handleTwitter(url) {
     }
   }
 
-  // Method 3: Cobalt fallback
+  // Method 2: Cobalt fallback
   const cobalt = await fetchViaCobalt(url);
   if (cobalt) {
     return {
@@ -463,6 +456,30 @@ export async function handleTwitter(url) {
       duration: 0,
       videoUrl: cobalt.url,
     };
+  }
+
+  // Method 3: BTCH / backend1 API (short 4s timeout)
+  try {
+    const res = await fetch(`https://backend1.tioo.eu.org/twitter?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const urls = Array.isArray(data.url) ? data.url : [];
+      const bestUrl = urls[0]?.hd || urls[0]?.sd || urls[1]?.hd || urls[1]?.sd || (typeof data.url === 'string' ? data.url : '');
+      if (bestUrl) {
+        return {
+          title: data.title || 'Twitter/X Video',
+          author: 'Twitter User',
+          thumbnail: '',
+          duration: 0,
+          videoUrl: bestUrl
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('BTCH Twitter failed:', err.message);
   }
 
   throw new Error('Gagal mengambil video Twitter/X. Pastikan postingan memiliki video dan tidak dikunci.');
@@ -551,17 +568,37 @@ export async function handleTikTok(url, resolvedUrl, lang) {
     // Both APIs race — fastest valid response wins
     return await Promise.any([bintangPromise, tikwmPromise]);
   } catch {
-    // Both failed — fallback to Cobalt audio-mode
+    // Both failed — fallback to Cobalt video then audio
     try {
-      const cobalt = await fetchViaCobalt(resolvedUrl, 'audio');
+      const cobalt = await fetchViaCobalt(resolvedUrl, 'auto');
       if (cobalt) {
         return {
           tiktok: true,
           title: 'TikTok Video',
           author: { nickname: 'TikTok User' },
-          cover: '', video: '', video_watermark: '',
-          audio: cobalt.url,
-          duration: '', images: []
+          cover: '',
+          video: cobalt.url,
+          video_watermark: '',
+          audio: '',
+          duration: '',
+          images: []
+        };
+      }
+    } catch { /* skip */ }
+
+    try {
+      const cobaltAudio = await fetchViaCobalt(resolvedUrl, 'audio');
+      if (cobaltAudio) {
+        return {
+          tiktok: true,
+          title: 'TikTok Video',
+          author: { nickname: 'TikTok User' },
+          cover: '',
+          video: '',
+          video_watermark: '',
+          audio: cobaltAudio.url,
+          duration: '',
+          images: []
         };
       }
     } catch { /* skip */ }
