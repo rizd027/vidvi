@@ -5,6 +5,14 @@
   "framework": null,
   "routes": [
     {
+      "src": "/api/download/([^/]+)",
+      "dest": "/api/download/[platform]?platform=$1"
+    },
+    {
+      "src": "/api/history/([^/]+)",
+      "dest": "/api/history/[id]?id=$1"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/$1"
     },
