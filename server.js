@@ -3,11 +3,10 @@ import cors from 'cors';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
-import { execFile, spawn } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, createReadStream, unlink, statSync } from 'fs';
+import { existsSync } from 'fs';
 import { Readable } from 'stream';
 
 const execFileAsync = promisify(execFile);
@@ -29,28 +28,6 @@ const PORT = process.env.PORT || 3000;
 // Path to bundled yt-dlp binary
 const YTDLP_PATH = path.join(__dirname, 'yt-dlp.exe');
 const HAS_YTDLP = existsSync(YTDLP_PATH);
-
-// Helper to find ffmpeg binary in common locations
-function findFfmpegPath() {
-  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) {
-    return process.env.FFMPEG_PATH;
-  }
-  const localApp = process.env.LOCALAPPDATA || '';
-  const userProfile = process.env.USERPROFILE || '';
-  const candidates = [
-    path.join(__dirname, 'ffmpeg.exe'),
-    path.join(__dirname, 'bin', 'ffmpeg.exe'),
-    path.join(localApp, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'),
-    path.join(userProfile, 'scoop', 'shims', 'ffmpeg.exe'),
-    'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe',
-    'C:\\ffmpeg\\bin\\ffmpeg.exe',
-    'C:\\ffmpeg\\ffmpeg.exe'
-  ];
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-  return null;
-}
 
 // Working Cobalt instances (tested & verified)
 const COBALT_INSTANCES = [
@@ -179,6 +156,7 @@ function validateUrl(platform, url, lang = 'id') {
     }
     case 'spotify': {
       if (u.includes('/playlist/') || u.includes('/album/') || u.includes('/artist/')) return t.playlistNotSupported;
+      if (u.includes('spotify.link') || u.includes('spoti.fi')) return null;
       if (!u.includes('/track/') && !u.includes('/embed/')) return t.invalidSpotifyUrl;
       return null;
     }
@@ -198,19 +176,20 @@ function validateUrl(platform, url, lang = 'id') {
       return null;
     }
     case 'instagram': {
-      const isIg = u.includes('instagram.com');
+      const isIg = u.includes('instagram.com') || u.includes('instagr.am');
       if (!isIg) return t.invalidInstagramUrl;
       if (u.match(/instagram\.com\/[^/]+\/?$/) && !u.includes('/p/') && !u.includes('/reel/') && !u.includes('/tv/')) return t.profileNotSupported;
       return null;
     }
     case 'facebook': {
-      const isFb = u.includes('facebook.com') || u.includes('fb.watch') || u.includes('fb.com');
+      const isFb = u.includes('facebook.com') || u.includes('fb.watch') || u.includes('fb.com') || u.includes('fb.me');
       if (!isFb) return t.invalidFacebookUrl;
       return null;
     }
     case 'twitter': {
-      const isTw = u.includes('twitter.com') || u.includes('x.com');
+      const isTw = u.includes('twitter.com') || u.includes('x.com') || u.includes('t.co');
       if (!isTw) return t.invalidTwitterUrl;
+      if (u.includes('t.co')) return null;
       if (!u.includes('/status/')) return t.invalidTwitterUrl;
       return null;
     }
@@ -289,68 +268,13 @@ async function handleYoutube(url) {
   // Primary: yt-dlp (best quality metadata)
   try {
     const json = await fetchViaYtdlp(url);
-    const allFormats = json.formats || [];
+    const formats = (json.formats || []).filter(f => f.url && (f.ext === 'mp4' || f.vcodec !== 'none'));
+    const bestVideo = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').sort((a, b) => (b.height || 0) - (a.height || 0))[0];
 
-    // ── Video formats (muxed or video-only with audio available) ──
-    // Collect all unique resolutions from muxed (has video+audio) and video-only streams
-    const muxedFormats = allFormats.filter(f => f.url && f.vcodec !== 'none' && f.acodec !== 'none' && f.height);
-    const videoOnlyFormats = allFormats.filter(f => f.url && f.vcodec !== 'none' && f.acodec === 'none' && f.height);
-
-    // Build deduplicated resolution map: prefer muxed over video-only
-    const resolutionMap = {};
-    // Add video-only first (lower priority)
-    for (const f of videoOnlyFormats) {
-      const key = f.height;
-      if (!resolutionMap[key] || (f.vbr || f.tbr || 0) > (resolutionMap[key].vbr || resolutionMap[key].tbr || 0)) {
-        resolutionMap[key] = f;
-      }
-    }
-    // Override with muxed (higher priority)
-    for (const f of muxedFormats) {
-      const key = f.height;
-      if (!resolutionMap[key] || (f.vbr || f.tbr || 0) > (resolutionMap[key].vbr || resolutionMap[key].tbr || 0)) {
-        resolutionMap[key] = f;
-      }
-    }
-
-    // Sort by resolution descending
-    const videoFormats = Object.values(resolutionMap)
-      .sort((a, b) => (b.height || 0) - (a.height || 0))
-      .map(f => ({
-        quality: f.height ? `${f.height}p` : (f.format_note || 'auto'),
-        height: f.height || 0,
-        url: f.url,
-        ext: f.ext || 'mp4',
-        hasAudio: f.acodec !== 'none',
-        filesize: f.filesize || f.filesize_approx || null,
-        vbr: f.vbr || f.tbr || null,
-        formatId: f.format_id
-      }));
-
-    // ── Audio formats ──
-    const allAudio = allFormats.filter(f => f.acodec !== 'none' && f.vcodec === 'none' && f.url);
-    const seenAudioExt = new Set();
-    const audioFormats = allAudio
-      .sort((a, b) => (b.abr || 0) - (a.abr || 0))
-      .filter(f => {
-        // Keep best of each ext type
-        if (!seenAudioExt.has(f.ext)) { seenAudioExt.add(f.ext); return true; }
-        return false;
-      })
-      .map(f => ({
-        label: f.ext === 'm4a' ? `M4A (AAC)${f.abr ? ` ~${Math.round(f.abr)}kbps` : ''}` :
-               f.ext === 'webm' ? `WebM (Opus)${f.abr ? ` ~${Math.round(f.abr)}kbps` : ''}` :
-               `${(f.ext || 'audio').toUpperCase()}${f.abr ? ` ~${Math.round(f.abr)}kbps` : ''}`,
-        url: f.url,
-        ext: f.ext || 'm4a',
-        abr: f.abr || 0,
-        filesize: f.filesize || f.filesize_approx || null,
-        formatId: f.format_id
-      }));
-
-    // Best single picks for backwards compat
-    const bestVideo = videoFormats[0];
-    const m4aAudio = audioFormats.find(f => f.ext === 'm4a') || audioFormats[0];
+    // Prefer M4A (AAC) audio over WebM/Opus for broader compatibility
+    const allAudio = (json.formats || []).filter(f => f.acodec !== 'none' && f.vcodec === 'none' && f.url);
+    const m4aAudio = allAudio.filter(f => f.ext === 'm4a').sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
+    const audioOnly = m4aAudio || allAudio.sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
 
     return {
       title: json.title || 'YouTube Video',
@@ -358,47 +282,20 @@ async function handleYoutube(url) {
       thumbnail: json.thumbnail || '',
       duration: json.duration || 0,
       videoUrl: bestVideo?.url || json.url || '',
-      audioUrl: m4aAudio?.url || '',
-      audioExt: m4aAudio?.ext || 'm4a',
+      audioUrl: audioOnly?.url || '',
+      audioExt: audioOnly?.ext || 'm4a',
       views: json.view_count,
       likes: json.like_count,
-      videoFormats,
-      audioFormats,
-      // Legacy field for history store
-      formats: videoFormats.slice(0, 5).map(f => ({ quality: f.quality, url: f.url, ext: f.ext }))
+      formats: formats.slice(0, 5).map(f => ({
+        quality: f.format_note || (f.height ? `${f.height}p` : 'auto'),
+        url: f.url,
+        ext: f.ext
+      }))
     };
 
   } catch (ytdlpErr) {
-    console.warn('yt-dlp failed for YouTube, trying BTCH / Cobalt fallback:', ytdlpErr.message.slice(0, 100));
-    // Fallback 1: BTCH / backend1
-    try {
-      const res = await fetch(`https://backend1.tioo.eu.org/youtube?url=${encodeURIComponent(url)}`, {
-        headers: { 'User-Agent': 'btch/6.4.0', 'X-Client-Version': '6.4.0' },
-        signal: AbortSignal.timeout(15000)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status && (data.mp4 || data.mp3)) {
-          const videoFormats = data.mp4 ? [{ quality: 'HD / 720p', height: 720, url: data.mp4, ext: 'mp4', hasAudio: true, filesize: null }] : [];
-          const audioFormats = data.mp3 ? [{ label: 'Audio MP3', url: data.mp3, ext: 'mp3', abr: 128, filesize: null }] : [];
-          return {
-            title: data.title || 'YouTube Video',
-            author: data.author || 'YouTube',
-            thumbnail: data.thumbnail || '',
-            duration: 0,
-            videoUrl: data.mp4 || '',
-            audioUrl: data.mp3 || '',
-            audioExt: 'mp3',
-            videoFormats,
-            audioFormats
-          };
-        }
-      }
-    } catch (e) {
-      console.warn('BTCH YouTube fallback failed:', e.message);
-    }
-
-    // Fallback 2: Cobalt
+    console.warn('yt-dlp failed for YouTube, trying Cobalt:', ytdlpErr.message.slice(0, 100));
+    // Fallback: Cobalt
     const cobalt = await fetchViaCobalt(url);
     if (cobalt) {
       return {
@@ -408,8 +305,6 @@ async function handleYoutube(url) {
         duration: 0,
         videoUrl: cobalt.url,
         audioUrl: '',
-        videoFormats: [{ quality: 'Best', height: 0, url: cobalt.url, ext: 'mp4', hasAudio: true, filesize: null }],
-        audioFormats: [],
       };
     }
     throw new Error('Failed to fetch YouTube video. Please try another link.');
@@ -981,178 +876,6 @@ app.post('/api/settings', async (req, res) => {
     res.status(500).json({ status: false, message: error.message });
   }
 });
-
-// ─── YouTube Tools Status Route ───────────────────────────────────────────
-app.get('/api/youtube/status', async (req, res) => {
-  const ffmpegLocation = findFfmpegPath();
-  let hasFfmpeg = !!ffmpegLocation;
-
-  if (!hasFfmpeg) {
-    try {
-      await execFileAsync('ffmpeg', ['-version']);
-      hasFfmpeg = true;
-    } catch {
-      hasFfmpeg = false;
-    }
-  }
-
-  res.json({
-    status: true,
-    hasYtdlp: HAS_YTDLP,
-    hasFfmpeg,
-    ffmpegPath: ffmpegLocation || (hasFfmpeg ? 'PATH' : null)
-  });
-});
-
-// ─── YouTube MP3 Conversion Route ─────────────────────────────────────────
-// Uses a temp file strategy: yt-dlp writes the converted MP3 to a temp file,
-// then the server streams the file to the browser and deletes it on finish.
-// This is more reliable than -o - (piping to stdout) because ffmpeg postprocessors
-// require a real file path — piping is not supported for format conversion.
-app.get('/api/youtube/mp3', async (req, res) => {
-  const { url, title } = req.query;
-  if (!url) return res.status(400).json({ status: false, message: 'url is required' });
-  if (!HAS_YTDLP) return res.status(503).json({ status: false, message: 'yt-dlp tidak tersedia di server ini.' });
-
-  // Verify ffmpeg availability upfront before starting conversion
-  const ffmpegLocation = findFfmpegPath();
-  if (!ffmpegLocation) {
-    let hasSystemFfmpeg = false;
-    try {
-      await execFileAsync('ffmpeg', ['-version']);
-      hasSystemFfmpeg = true;
-    } catch {}
-    if (!hasSystemFfmpeg) {
-      return res.status(422).json({
-        status: false,
-        message: 'ffmpeg tidak ditemukan di server. Install ffmpeg untuk mengaktifkan konversi MP3.'
-      });
-    }
-  }
-
-  const decodedUrl = decodeURIComponent(url);
-  const safeTitle = (title ? decodeURIComponent(title) : 'youtube-audio')
-    .replace(/[^\w\s.-]/g, '_').replace(/\s+/g, '_').slice(0, 120);
-  const filename = `${safeTitle}.mp3`;
-  const asciiName = filename.replace(/[^\x20-\x7E]/g, '_');
-  const encodedName = encodeURIComponent(filename);
-
-  // Temp file path — yt-dlp writes here, we stream it, then delete it
-  const tmpId = `vidvi_mp3_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const tmpBase = path.join(os.tmpdir(), tmpId);
-  // yt-dlp will append .mp3 itself, so pass base path without extension
-  const tmpFile = `${tmpBase}.mp3`;
-
-  console.log(`🎵 MP3 conversion started: ${decodedUrl.slice(0, 80)}`);
-
-  const args = [
-    '--no-playlist',
-    '--extract-audio',
-    '--audio-format', 'mp3',
-    '--audio-quality', '0',
-    '--no-warnings'
-  ];
-
-  if (ffmpegLocation) {
-    args.push('--ffmpeg-location', ffmpegLocation);
-  }
-
-  args.push('-o', tmpBase + '.%(ext)s', decodedUrl);
-
-  let errorBuffer = '';
-
-  const ytdlpProcess = spawn(YTDLP_PATH, args, { windowsHide: true });
-
-  ytdlpProcess.stderr.on('data', (data) => { errorBuffer += data.toString(); });
-  ytdlpProcess.stdout.on('data', () => {});   // drain stdout to prevent blocking
-
-  ytdlpProcess.on('error', (err) => {
-    console.error('yt-dlp spawn error:', err.message);
-    if (!res.headersSent) {
-      res.status(500).json({ status: false, message: 'Gagal memulai konversi MP3: ' + err.message });
-    }
-  });
-
-  ytdlpProcess.on('close', (code) => {
-    if (code !== 0) {
-      console.error(`yt-dlp MP3 failed (code ${code}):`, errorBuffer.slice(0, 300));
-
-      // Give user a friendly error message
-      let userMsg = 'Konversi MP3 gagal.';
-      const errLower = errorBuffer.toLowerCase();
-      if (errLower.includes('ffmpeg') && errLower.includes('not found')) {
-        userMsg = 'ffmpeg tidak ditemukan di server. Install ffmpeg untuk mengaktifkan konversi MP3.';
-      } else if (errLower.includes('403') || errLower.includes('forbidden')) {
-        userMsg = 'YouTube memblokir permintaan ini. Coba lagi nanti atau gunakan unduhan audio langsung.';
-      } else if (errLower.includes('sign in') || errLower.includes('age')) {
-        userMsg = 'Video membutuhkan login atau verifikasi umur dan tidak bisa diunduh.';
-      } else if (errLower.includes('private')) {
-        userMsg = 'Video ini bersifat privat dan tidak dapat diunduh.';
-      }
-
-      if (!res.headersSent) {
-        return res.status(422).json({ status: false, message: userMsg });
-      }
-      return;
-    }
-
-    // Verify the output file exists and is not empty
-    let fileSize = 0;
-    try {
-      fileSize = statSync(tmpFile).size;
-    } catch {
-      if (!res.headersSent) {
-        return res.status(500).json({ status: false, message: 'File MP3 tidak ditemukan setelah konversi. Pastikan ffmpeg terinstall.' });
-      }
-      return;
-    }
-
-    if (fileSize === 0) {
-      unlink(tmpFile, () => {});
-      if (!res.headersSent) {
-        return res.status(500).json({ status: false, message: 'File MP3 kosong. Konversi gagal.' });
-      }
-      return;
-    }
-
-    console.log(`✅ MP3 ready (${Math.round(fileSize / 1024)}KB), streaming: ${filename}`);
-
-    // Stream the converted file to the browser
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
-    res.setHeader('Content-Length', fileSize);
-    res.setHeader('Cache-Control', 'no-cache');
-
-    const fileStream = createReadStream(tmpFile);
-
-    fileStream.on('error', (err) => {
-      console.error('File stream error:', err.message);
-      if (!res.writableEnded) res.end();
-    });
-
-    fileStream.on('close', () => {
-      // Delete temp file after streaming completes
-      unlink(tmpFile, (err) => {
-        if (err) console.warn('Failed to delete temp MP3:', err.message);
-      });
-    });
-
-    // Abort stream if client disconnects early
-    req.on('close', () => fileStream.destroy());
-
-    fileStream.pipe(res);
-  });
-
-  // Kill yt-dlp if client disconnects during conversion
-  req.on('close', () => {
-    if (!ytdlpProcess.killed) {
-      ytdlpProcess.kill();
-      // Cleanup temp file if it exists
-      try { unlink(tmpFile, () => {}); } catch {}
-    }
-  });
-});
-
 
 // ─── Proxy Download Route ──────────────────────────────────────────────────
 // Streams a remote URL through the server so the browser triggers a real

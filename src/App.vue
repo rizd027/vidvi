@@ -46,6 +46,10 @@ const themeOverrides = computed(() => {
 
 // Initialize theme class on document element and pull settings from DB
 const initializeApp = async () => {
+  // Apply saved theme and language immediately from store/localStorage
+  applyThemeClass(appStore.themeMode)
+  locale.value = appStore.currentLanguage
+
   try {
     const res = await fetch('/api/settings')
     if (res.ok) {
@@ -59,7 +63,7 @@ const initializeApp = async () => {
           appStore.themeMode = json.data.theme
           applyThemeClass(json.data.theme)
         }
-        if (json.data.autoPasteDownload) {
+        if (json.data.autoPasteDownload !== undefined) {
           appStore.autoPasteDownload = json.data.autoPasteDownload === 'true'
         }
       }

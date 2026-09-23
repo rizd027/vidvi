@@ -42,7 +42,7 @@ export const messages = {
 export async function resolveUrl(url) {
   try {
     const urlLower = url.toLowerCase();
-    const needsResolve = ['vt.tiktok.com', 'vm.tiktok.com', 'capcut.net', 'youtu.be', 'fb.watch', 't.co'].some(d => urlLower.includes(d));
+    const needsResolve = ['vt.tiktok.com', 'vm.tiktok.com', 'capcut.net', 'youtu.be', 'fb.watch', 'fb.me', 't.co', 'spotify.link', 'spoti.fi'].some(d => urlLower.includes(d));
     if (!needsResolve) return url;
 
     // HEAD request with 4s timeout — fast redirect follow
@@ -78,6 +78,7 @@ export function validateUrl(platform, url, lang = 'id') {
     }
     case 'spotify': {
       if (u.includes('/playlist/') || u.includes('/album/') || u.includes('/artist/')) return t.playlistNotSupported;
+      if (u.includes('spotify.link') || u.includes('spoti.fi')) return null;
       if (!u.includes('/track/') && !u.includes('/embed/')) return t.invalidSpotifyUrl;
       return null;
     }
@@ -97,19 +98,20 @@ export function validateUrl(platform, url, lang = 'id') {
       return null;
     }
     case 'instagram': {
-      const isIg = u.includes('instagram.com');
+      const isIg = u.includes('instagram.com') || u.includes('instagr.am');
       if (!isIg) return t.invalidInstagramUrl;
       if (u.match(/instagram\.com\/[^/]+\/?$/) && !u.includes('/p/') && !u.includes('/reel/') && !u.includes('/tv/')) return t.profileNotSupported;
       return null;
     }
     case 'facebook': {
-      const isFb = u.includes('facebook.com') || u.includes('fb.watch') || u.includes('fb.com');
+      const isFb = u.includes('facebook.com') || u.includes('fb.watch') || u.includes('fb.com') || u.includes('fb.me');
       if (!isFb) return t.invalidFacebookUrl;
       return null;
     }
     case 'twitter': {
-      const isTw = u.includes('twitter.com') || u.includes('x.com');
+      const isTw = u.includes('twitter.com') || u.includes('x.com') || u.includes('t.co');
       if (!isTw) return t.invalidTwitterUrl;
+      if (u.includes('t.co')) return null;
       if (!u.includes('/status/')) return t.invalidTwitterUrl;
       return null;
     }
