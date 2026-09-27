@@ -497,7 +497,14 @@ onUnmounted(() => {
     <!-- STEP 1: INPUT URL -->
     <div v-if="currentStep === 1" class="step-container">
       <div class="header-section text-center">
-        <h1>Vidvi</h1>
+        <div class="app-logo-badge" @click="handleReset" title="Vidvi">
+          <div class="logo-glow"></div>
+          <img src="/app-icon.png" alt="Vidvi Logo" class="hero-logo-img" />
+        </div>
+        <div class="brand-title-wrap">
+          <h1>Vidvi</h1>
+          <span class="pro-tag">FAST</span>
+        </div>
         <p class="subtitle">{{ t('subtitle') }}</p>
       </div>
 
@@ -594,6 +601,7 @@ onUnmounted(() => {
     <div v-else-if="currentStep === 2" class="step-container text-center processing-state">
       <div class="loader-wrapper">
         <div class="spinner-ring"></div>
+        <img src="/app-icon.png" alt="Vidvi" class="processing-logo" />
       </div>
       <h3 class="pulse" style="margin-top: var(--spacing-md)">{{ t('downloading') }}</h3>
       <p style="margin-top: 8px">{{ t('detecting') }}</p>
@@ -958,8 +966,92 @@ onUnmounted(() => {
 
 .text-center { text-align: center; }
 
+/* ── App Hero Logo & Brand ── */
+.header-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.app-logo-badge {
+  position: relative;
+  width: 66px;
+  height: 66px;
+  margin-bottom: 4px;
+  border-radius: 17px;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+  user-select: none;
+}
+
+.app-logo-badge:hover {
+  transform: translateY(-3px) scale(1.04);
+  box-shadow: 0 14px 28px -6px rgba(0, 0, 0, 0.5), 0 0 24px rgba(var(--accent-rgb), 0.18);
+}
+
+.logo-glow {
+  position: absolute;
+  inset: -4px;
+  background: radial-gradient(circle, rgba(134, 59, 255, 0.35) 0%, rgba(71, 191, 255, 0.15) 50%, transparent 70%);
+  filter: blur(12px);
+  border-radius: 20px;
+  opacity: 0.65;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.app-logo-badge:hover .logo-glow {
+  opacity: 1;
+}
+
+.hero-logo-img {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 16px;
+  z-index: 1;
+  display: block;
+}
+
+.brand-title-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.brand-title-wrap h1 {
+  font-size: 2.2rem;
+  letter-spacing: -0.03em;
+  background: linear-gradient(180deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.pro-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--text-primary);
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
+  text-transform: uppercase;
+  transform: translateY(-1px);
+}
+
 .subtitle {
-  margin-top: 8px;
+  margin-top: 2px;
   color: var(--text-secondary);
 }
 
@@ -1144,6 +1236,7 @@ onUnmounted(() => {
 }
 
 .loader-wrapper {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1151,12 +1244,34 @@ onUnmounted(() => {
 }
 
 .spinner-ring {
-  width: 48px;
-  height: 48px;
+  width: 76px;
+  height: 76px;
   border: 3px solid rgba(var(--accent-rgb), 0.08);
   border-top-color: var(--accent-color);
   border-radius: 50%;
   animation: spin 0.9s ease-in-out infinite;
+}
+
+.processing-logo {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  animation: pulseLogo 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes pulseLogo {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.04);
+    opacity: 1;
+    filter: drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.3));
+  }
 }
 
 /* ── Result Card ── */

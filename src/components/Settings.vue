@@ -204,6 +204,30 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
+      <!-- App Info Card with Icon -->
+      <div class="settings-card app-about-card">
+        <div class="about-content">
+          <div class="about-logo-wrapper">
+            <img src="/app-icon.png" alt="Vidvi Icon" class="about-app-icon" />
+          </div>
+          <div class="about-details">
+            <div class="about-title-row">
+              <h3>Vidvi Downloader</h3>
+              <span class="about-version">v1.0.0 Pro</span>
+            </div>
+            <p class="about-desc">
+              {{ locale === 'id' ? 'Pengunduh video & audio instan tanpa watermark.' : 'Instant video & audio downloader without watermark.' }}
+            </p>
+            <div class="about-badges">
+              <span class="status-indicator">
+                <span class="status-dot"></span>
+                {{ locale === 'id' ? 'Sistem Siap & Aktif' : 'System Ready & Active' }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -317,6 +341,94 @@ onMounted(() => {
   background-color: var(--accent-color);
   color: var(--bg-primary);
   box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.25);
+}
+
+/* ── App About Card ── */
+.app-about-card {
+  margin-top: 8px;
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(var(--accent-rgb), 0.03) 100%);
+}
+
+.about-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.about-logo-wrapper {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-primary);
+}
+
+.about-app-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.about-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.about-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.about-title-row h3 {
+  font-size: 0.98rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.about-version {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--text-primary);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+}
+
+.about-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.about-badges {
+  margin-top: 2px;
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #10b981;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
 }
 
 /* Desktop styles */

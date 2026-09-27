@@ -95,7 +95,10 @@ const formatDate = (dateStr: string) => {
 
     <!-- History List -->
     <div v-if="filteredHistory.length === 0" class="empty-state text-center">
-      <p>{{ t('emptyHistory') }}</p>
+      <div class="empty-logo-wrapper">
+        <img src="/app-icon.png" alt="Vidvi" class="empty-app-icon" />
+      </div>
+      <p class="empty-msg">{{ t('emptyHistory') }}</p>
     </div>
 
     <div v-else class="history-list">
@@ -223,6 +226,36 @@ const formatDate = (dateStr: string) => {
 .loading-state, .empty-state {
   padding: var(--spacing-xl) 0;
   color: var(--text-secondary);
+}
+
+.empty-logo-wrapper {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  opacity: 0.35;
+  filter: grayscale(30%);
+  transition: all 0.3s ease;
+}
+
+.empty-logo-wrapper:hover {
+  opacity: 0.75;
+  filter: grayscale(0%);
+  transform: scale(1.05);
+}
+
+.empty-app-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.empty-msg {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: 0;
 }
 
 .history-list {

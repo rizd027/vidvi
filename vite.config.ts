@@ -8,11 +8,11 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.ico', 'favicon.svg', 'favicon.png', 'apple-touch-icon.png', 'app-icon.png'],
       manifest: {
         name: 'Vidvi Downloader',
         short_name: 'Vidvi',
-        description: 'Lightweight & Instant Downloader for Spotify, TikTok, and CapCut',
+        description: 'Lightweight & Instant Downloader for Spotify, TikTok, YouTube, Instagram, Facebook, Twitter, and CapCut',
         theme_color: '#000000',
         background_color: '#000000',
         display: 'standalone',
